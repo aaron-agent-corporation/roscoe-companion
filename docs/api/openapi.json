@@ -26514,6 +26514,10 @@
                           "type": {
                             "type": "string"
                           },
+                          "providerInstanceId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
                           "configured": {
                             "type": "boolean"
                           },
@@ -26545,6 +26549,7 @@
                         },
                         "required": [
                           "type",
+                          "providerInstanceId",
                           "configured",
                           "registered",
                           "custody",
@@ -26746,6 +26751,10 @@
                     "type": {
                       "type": "string"
                     },
+                    "providerInstanceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "configured": {
                       "type": "boolean"
                     },
@@ -26777,6 +26786,7 @@
                   },
                   "required": [
                     "type",
+                    "providerInstanceId",
                     "configured",
                     "registered",
                     "custody",
@@ -26825,6 +26835,10 @@
                     "type": {
                       "type": "string"
                     },
+                    "providerInstanceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
                     "configured": {
                       "type": "boolean"
                     },
@@ -26856,6 +26870,7 @@
                   },
                   "required": [
                     "type",
+                    "providerInstanceId",
                     "configured",
                     "registered",
                     "custody",
