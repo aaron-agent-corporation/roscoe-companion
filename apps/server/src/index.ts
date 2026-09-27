@@ -133,7 +133,10 @@ import { createUnclaimedChatsRouter } from './routes/unclaimed-chats.js';
 import { ConnectorRegistry } from './services/connectors/registry.js';
 import { ConnectorCatalogCache } from './services/connectors/resources/catalog-cache.js';
 import { createRawMcpPendingConnectResolver } from './services/connectors/resources/raw-mcp-pending-connect.js';
-import { ConnectorProviderBootstrapper } from './services/connectors/bootstrap.js';
+import {
+  ConnectorProviderBootstrapper,
+  TEST_CONNECTOR_PROVIDER_TYPE,
+} from './services/connectors/bootstrap.js';
 import { SessionConnectorAttachmentStore } from './services/connectors/attachment-store.js';
 import { registerConnectorAgentCleanup } from './services/connectors/agent-access-cleanup.js';
 import { ConnectorAuthorityCleanupService } from './services/connectors/authority-cleanup-service.js';
@@ -3039,6 +3042,17 @@ async function start() {
             credentials: credentialProvider,
             // Test-mode connect flows use the actual dial origin of this server.
             localOrigin,
+            // A saved-again key starts a brand new scripted provider whose
+            // account ids never repeat (DOR-2451) — so a delete has to wipe
+            // this provider's own connection history too, or a stale row
+            // from an earlier key save just sits there under the same
+            // stable instance id forever.
+            purgeConnections: () =>
+              connectorRegistry.purgeTestConnectorConnections(
+                legacyDefaultProviderInstanceId(
+                  TEST_CONNECTOR_PROVIDER_TYPE
+                ) as ConnectorProviderInstanceId
+              ),
           });
         },
       },
