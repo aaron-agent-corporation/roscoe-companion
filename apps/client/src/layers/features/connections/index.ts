@@ -3,9 +3,10 @@
  * list of apps (yours, then all apps), an app account's side panel, the
  * connect flow, the shared "who can use it" access card (page and chat), the
  * "Needs you" strip with its request and review dialogs, and the claim feed
- * for chats nobody answers. Also the session view's quiet accounts group, and
- * the two sections Settings › Connections renders: the ways DorkOS reaches
- * your apps and how chat apps behave.
+ * for chats nobody answers. Also the session view's quiet accounts group, the
+ * two sections Settings › Connections renders (the ways DorkOS reaches your
+ * apps and how chat apps behave), and the card an agent's request for an app
+ * draws in a chat or a room.
  *
  * @module features/connections
  */
@@ -45,3 +46,8 @@ export type {
   PageAccessCardProps,
   AgentAccessCardProps,
 } from './ui/access/ConnectionAccessCard';
+export { AgentRequestCard } from './ui/agent-request/AgentRequestCard';
+export type { AgentRequestCardProps } from './ui/agent-request/AgentRequestCard';
+export { ChatAgentRequest } from './ui/agent-request/ChatAgentRequest';
+export type { ChatAgentRequestProps } from './ui/agent-request/ChatAgentRequest';
+export { isConnectionRequestTool } from './lib/agent-request-call';

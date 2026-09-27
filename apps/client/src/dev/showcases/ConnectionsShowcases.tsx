@@ -36,6 +36,7 @@ import {
   mockConnectionDetail,
 } from '../mock-samples';
 import { ConnectionAccessCardShowcase } from './ConnectionAccessCardShowcase';
+import { AgentRequestCardShowcase } from './AgentRequestCardShowcase';
 
 const SERVICES = new Map(MOCK_CATALOG_SERVICES.map((service) => [service.serviceSlug, service]));
 
@@ -309,6 +310,7 @@ export function ConnectionsShowcases() {
       </PlaygroundSection>
 
       <ConnectionAccessCardShowcase />
+      <AgentRequestCardShowcase />
       <ConnectionWaysShowcase />
     </>
   );
