@@ -27749,6 +27749,42 @@
                             "type": "integer",
                             "minimum": 0
                           },
+                          "everyAgent": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "operationRevisionIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "minItems": 1,
+                                "maxItems": 100000
+                              },
+                              "classifications": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "read",
+                                    "write",
+                                    "destructive"
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 3
+                              }
+                            },
+                            "required": [
+                              "operationRevisionIds",
+                              "classifications"
+                            ],
+                            "additionalProperties": false
+                          },
                           "subscriptionCount": {
                             "type": "integer",
                             "minimum": 0
@@ -27842,6 +27878,7 @@
                           "custody",
                           "payer",
                           "agentCount",
+                          "everyAgent",
                           "subscriptionCount",
                           "usage",
                           "warnings"
@@ -28755,6 +28792,42 @@
                           "type": "integer",
                           "minimum": 0
                         },
+                        "everyAgent": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "properties": {
+                            "operationRevisionIds": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "minItems": 1,
+                              "maxItems": 100000
+                            },
+                            "classifications": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "read",
+                                  "write",
+                                  "destructive"
+                                ]
+                              },
+                              "minItems": 1,
+                              "maxItems": 3
+                            }
+                          },
+                          "required": [
+                            "operationRevisionIds",
+                            "classifications"
+                          ],
+                          "additionalProperties": false
+                        },
                         "subscriptionCount": {
                           "type": "integer",
                           "minimum": 0
@@ -28848,6 +28921,7 @@
                         "custody",
                         "payer",
                         "agentCount",
+                        "everyAgent",
                         "subscriptionCount",
                         "usage",
                         "warnings"
@@ -29708,6 +29782,9 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "everyAgent": {
+                      "type": "boolean"
+                    },
                     "affectedSessionCount": {
                       "type": "integer",
                       "minimum": 0
@@ -29724,6 +29801,7 @@
                   "required": [
                     "connectionId",
                     "affectedAgentCount",
+                    "everyAgent",
                     "affectedSessionCount",
                     "affectedSubscriptionCount",
                     "pendingDeliveryCount"
@@ -30549,6 +30627,9 @@
                             },
                             "maxItems": 100000
                           },
+                          "everyAgent": {
+                            "type": "boolean"
+                          },
                           "authoritySync": {
                             "oneOf": [
                               {
@@ -30613,6 +30694,7 @@
                           "authenticationStatus",
                           "reconciliationStatus",
                           "operationRevisionIds",
+                          "everyAgent",
                           "authoritySync"
                         ],
                         "additionalProperties": false
@@ -30635,6 +30717,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/every-agent-grants": {
+      "get": {
+        "tags": [
+          "Connectors"
+        ],
+        "summary": "Read what every agent, including a new one, inherits",
+        "description": "Lists each connection whose owner gave every agent access, with the exact reviewed actions. There is no per-agent exclusion, so this is what any new agent gets the moment it is created.",
+        "responses": {
+          "200": {
+            "description": "Connections every agent can use, and at which level",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "connectionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "toolkit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "lifecycle": {
+                            "type": "string",
+                            "enum": [
+                              "connected",
+                              "paused"
+                            ]
+                          },
+                          "access": {
+                            "type": "object",
+                            "properties": {
+                              "operationRevisionIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "minItems": 1,
+                                "maxItems": 100000
+                              },
+                              "classifications": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "read",
+                                    "write",
+                                    "destructive"
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 3
+                              }
+                            },
+                            "required": [
+                              "operationRevisionIds",
+                              "classifications"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "connectionId",
+                          "toolkit",
+                          "label",
+                          "lifecycle",
+                          "access"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 500
+                    }
+                  },
+                  "required": [
+                    "connections"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -31234,6 +31414,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -31541,6 +31725,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -32046,6 +32266,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -32353,6 +32577,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -32863,6 +33123,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -33170,6 +33434,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -33680,6 +33980,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -33987,6 +34291,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -34513,6 +34853,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -34820,6 +35164,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -35310,6 +35690,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -35617,6 +36001,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -35976,6 +36396,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -36283,6 +36707,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -37184,6 +37644,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -37491,6 +37955,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -37996,6 +38496,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -38303,6 +38807,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -38813,6 +39353,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -39120,6 +39664,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -39630,6 +40210,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -39937,6 +40521,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -40463,6 +41083,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -40770,6 +41394,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -41260,6 +41920,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -41567,6 +42231,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -41926,6 +42626,10 @@
                                         "type": "integer",
                                         "minimum": 0
                                       },
+                                      "everyAgent": {
+                                        "type": "boolean",
+                                        "default": false
+                                      },
                                       "affectedOperations": {
                                         "type": "array",
                                         "items": {
@@ -42233,6 +42937,42 @@
                                           ],
                                           "additionalProperties": false
                                         }
+                                      },
+                                      "keptThroughEveryAgent": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "operationRevisionId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "operationSlug": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "toolkitVersion": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "capabilityClassification": {
+                                              "type": "string",
+                                              "enum": [
+                                                "read",
+                                                "write",
+                                                "destructive"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "operationRevisionId",
+                                            "operationSlug",
+                                            "toolkitVersion",
+                                            "capabilityClassification"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        "default": []
                                       }
                                     },
                                     "required": [
@@ -43157,6 +43897,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -43464,6 +44208,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -43969,6 +44749,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -44276,6 +45060,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -44786,6 +45606,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -45093,6 +45917,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -45603,6 +46463,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -45910,6 +46774,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -46436,6 +47336,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -46743,6 +47647,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -47233,6 +48173,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -47540,6 +48484,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -47899,6 +48879,10 @@
                                   "type": "integer",
                                   "minimum": 0
                                 },
+                                "everyAgent": {
+                                  "type": "boolean",
+                                  "default": false
+                                },
                                 "affectedOperations": {
                                   "type": "array",
                                   "items": {
@@ -48206,6 +49190,42 @@
                                     ],
                                     "additionalProperties": false
                                   }
+                                },
+                                "keptThroughEveryAgent": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "operationRevisionId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "operationSlug": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "toolkitVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "capabilityClassification": {
+                                        "type": "string",
+                                        "enum": [
+                                          "read",
+                                          "write",
+                                          "destructive"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "operationRevisionId",
+                                      "operationSlug",
+                                      "toolkitVersion",
+                                      "capabilityClassification"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "default": []
                                 }
                               },
                               "required": [
@@ -48799,6 +49819,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -49106,6 +50130,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -49611,6 +50671,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -49918,6 +50982,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -50428,6 +51528,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -50735,6 +51839,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -51245,6 +52385,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -51552,6 +52696,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -52078,6 +53258,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -52385,6 +53569,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -52875,6 +54095,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -53182,6 +54406,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -53541,6 +54801,10 @@
                                       "type": "integer",
                                       "minimum": 0
                                     },
+                                    "everyAgent": {
+                                      "type": "boolean",
+                                      "default": false
+                                    },
                                     "affectedOperations": {
                                       "type": "array",
                                       "items": {
@@ -53848,6 +55112,42 @@
                                         ],
                                         "additionalProperties": false
                                       }
+                                    },
+                                    "keptThroughEveryAgent": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "operationRevisionId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "operationSlug": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "toolkitVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "capabilityClassification": {
+                                            "type": "string",
+                                            "enum": [
+                                              "read",
+                                              "write",
+                                              "destructive"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "operationRevisionId",
+                                          "operationSlug",
+                                          "toolkitVersion",
+                                          "capabilityClassification"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      "default": []
                                     }
                                   },
                                   "required": [
@@ -54377,6 +55677,26 @@
                         "additionalProperties": false
                       }
                     },
+                    "everyAgent": {
+                      "type": "object",
+                      "properties": {
+                        "available": {
+                          "type": "boolean"
+                        },
+                        "operationRevisionIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "available",
+                        "operationRevisionIds"
+                      ],
+                      "additionalProperties": false
+                    },
                     "catalogComplete": {
                       "type": "boolean",
                       "enum": [
@@ -54398,6 +55718,7 @@
                     "candidates",
                     "agents",
                     "currentGrants",
+                    "everyAgent",
                     "catalogComplete",
                     "createdAt",
                     "expiresAt"
@@ -54409,6 +55730,63 @@
           },
           "409": {
             "description": "The connection must be reconciled before it can be edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/connectors/connections/{connectionId}/every-agent": {
+      "delete": {
+        "tags": [
+          "Connectors"
+        ],
+        "summary": "Stop sharing one connection with every agent",
+        "description": "Owner only. Ends the every-agent grant at once, for every agent. Needs no permission review, so it works while the service is unavailable.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "connectionId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "How many shared actions ended",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "connectionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "revokedCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "connectionId",
+                    "revokedCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Connection absent or owned by someone else",
             "content": {
               "application/json": {
                 "schema": {
@@ -54459,6 +55837,22 @@
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "everyAgent": {
+                    "type": "object",
+                    "properties": {
+                      "operationRevisionIds": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "operationRevisionIds"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -54567,6 +55961,22 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "everyAgent": {
+                      "type": "object",
+                      "properties": {
+                        "operationRevisionIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": [
+                        "operationRevisionIds"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
