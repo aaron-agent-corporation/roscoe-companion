@@ -12,6 +12,7 @@ import {
   useStartConnectorAuthentication,
   useStartConnectorAgentRequestAuthentication,
   serviceName as toolkitServiceName,
+  serviceLogo,
 } from '@/layers/entities/connectors';
 import {
   Button,
@@ -387,6 +388,7 @@ export function ConnectDialog({
                   mode="page"
                   connectionId={activeFlow.connectionId}
                   serviceName={serviceName}
+                  logo={serviceLogo(resolvedService)}
                   onSkip={() => {
                     finish();
                     onConnected?.(activeFlow.connectionId);
