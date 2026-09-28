@@ -147,6 +147,7 @@ import { ConnectorReconciliationService } from './services/connectors/reconcilia
 import { ConnectorAuthenticationFlowService } from './services/connectors/resources/authentication-flow-service.js';
 import { ConnectorLifecycleService } from './services/connectors/resources/lifecycle-service.js';
 import { ConnectorOperatorQueryService } from './services/connectors/resources/operator-query-service.js';
+import { ConnectorAppActionsService } from './services/connectors/resources/app-actions-service.js';
 import { CatalogLogoService } from './services/connectors/resources/catalog-logos.js';
 import { ManagedAuthoritySyncService } from './services/connectors/resources/managed-authority-sync-service.js';
 import { ManagedCloudConnectorProvider } from './services/connectors/providers/managed/managed-cloud.js';
@@ -3217,6 +3218,11 @@ async function start() {
         : undefined;
     }
   );
+  const connectorAppActions = new ConnectorAppActionsService({
+    db,
+    registry: connectorRegistry,
+    dorkHome,
+  });
   // A logo's source is looked up in the kept app lists only, never listed.
   const catalogLogos = new CatalogLogoService({
     dorkHome,
@@ -3938,6 +3944,7 @@ async function start() {
       logos: catalogLogos,
       authentication: connectorAuthenticationFlows,
       lifecycle: connectorLifecycle,
+      actions: connectorAppActions,
       resolveOwner: () => connectorOwner,
       loginEnabled: () => configManager.get('auth').enabled,
     })
