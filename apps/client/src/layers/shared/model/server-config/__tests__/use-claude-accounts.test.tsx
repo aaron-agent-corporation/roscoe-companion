@@ -30,9 +30,14 @@ const WORK = {
   isAccountRoot: true,
 };
 
-function renderAccounts() {
+function renderAccounts(claudeCode: Record<string, unknown> = {}) {
   const config = {
-    claudeCode: { resolvedAccount: PERSONAL.path, inherited: false, accounts: [PERSONAL, WORK] },
+    claudeCode: {
+      resolvedAccount: PERSONAL.path,
+      inherited: false,
+      accounts: [PERSONAL, WORK],
+      ...claudeCode,
+    },
   } as unknown as ServerConfig;
   const transport = createMockTransport({ getConfig: async () => config });
   const queryClient = createTestQueryClient();
@@ -58,5 +63,27 @@ describe('useClaudeAccounts', () => {
     expect(result.current.colorFor('work')).toBe('#d6336c');
     expect(result.current.colorFor('/Users/dev/.claude')).toBe('#2f7be0');
     expect(result.current.colorFor('/Users/dev/.claude9')).toBeNull();
+  });
+
+  it('draws the default account in the color the server resolved (DOR-2492)', async () => {
+    // The server says the default stands alone in teal, even though the
+    // inherited folder string-matches a registered row. The client must not
+    // second-guess it with its own alias or positional rule.
+    const { result } = renderAccounts({
+      resolvedAccount: WORK.path,
+      inherited: true,
+      defaultAccountColor: '#0d9488',
+      defaultAccountResolvedColor: '#0d9488',
+    });
+    await waitFor(() => expect(result.current.accounts).toHaveLength(2));
+    expect(result.current.colorFor('default')).toBe('#0d9488');
+    expect(result.current.defaultAccountColor).toBe('#0d9488');
+    expect(result.current.defaultAccountResolvedColor).toBe('#0d9488');
+  });
+
+  it('answers null for default when the server did not resolve a color', async () => {
+    const { result } = renderAccounts({ defaultAccountColor: '#0d9488' });
+    await waitFor(() => expect(result.current.accounts).toHaveLength(2));
+    expect(result.current.colorFor('default')).toBeNull();
   });
 });
