@@ -159,6 +159,16 @@ folder is inside the rooms directory, and `getGitStatus` never runs git there �
 settings are only read through `room-repo-git.ts`, which audits them first
 (`ROOM_REPO_CONFIG_UNSAFE`).
 
+That refusal is a `RoomRepoConfigUnsafeError` carrying the settings file and the offending keys, the
+operator's sentence (`forOwner`), one shell-quoted `git config --file … --unset-all …` command
+(`command`), and a plain line for everyone else (`forMember`). Its `message`, which is what the log
+records, is the sentence plus the command. Both places a refusal leaves the server word it through
+`roomRefusalFor`: `sendRoomError` (HTTP) and the room capabilities' `answering` helpers (MCP, for
+`merge_to_room_main` and `room_repo_status`). Only a caller resolved as the install's owner gets
+`forOwner` and a separate `command` field, which the Files panel shows as a copyable block; an
+agent, another person, and a caller that was never resolved get `forMember`, which names no path
+(DOR-2457).
+
 ## The turn-start refresh: bringing a copy up to date
 
 ADR 260926-180308, spec `agent-home-desk` §6. When a room turn launches, `room-worktree-refresh.ts`

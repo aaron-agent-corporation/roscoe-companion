@@ -12,8 +12,16 @@
  * @module routes/room-error-response
  */
 import type { Response } from 'express';
-import { RoomError, type RoomErrorCode } from '../services/rooms/index.js';
+import {
+  isOwnerRecord,
+  RoomError,
+  roomRefusalFor,
+  type AuthorRecord,
+  type RoomErrorCode,
+} from '../services/rooms/index.js';
+import { readOwnerAccount } from '../services/core/auth/index.js';
 import { logger } from '../lib/logger.js';
+import { ROOM_CALLER_LOCAL } from './room-caller-local.js';
 
 /** HTTP status for each way the room service can refuse. */
 export const STATUS_BY_CODE: Record<RoomErrorCode, number> = {
@@ -202,11 +210,29 @@ export const STATUS_BY_CODE: Record<RoomErrorCode, number> = {
  * @param err - The caught value.
  * @param context - Route label for the log line.
  */
-export function sendRoomError(res: Response, err: unknown, context: string): void {
+export function sendRoomError(
+  res: Pick<Response, 'status' | 'locals'>,
+  err: unknown,
+  context: string
+): void {
   if (err instanceof RoomError) {
-    res.status(STATUS_BY_CODE[err.code]).json({ error: err.message, code: err.code });
+    // Worded before a status is set, so nothing can leave a half-written reply.
+    const body = roomRefusalFor(err, () => ownerAsking(res));
+    res.status(STATUS_BY_CODE[err.code]).json(body);
     return;
   }
   logger.error(`[rooms] ${context} failed`, { err });
   res.status(500).json({ error: 'Internal server error' });
+}
+
+/**
+ * Whether the caller `resolveCaller` left on `res.locals` is the install's
+ * owner. `false` when no caller was resolved, so a route that refused before
+ * resolving its caller shows the operator's refusal to nobody (DOR-2457).
+ *
+ * @param res - The response, carrying the caller `resolveCaller` resolved.
+ */
+export function ownerAsking(res: Pick<Response, 'locals'>): boolean {
+  const caller = res.locals[ROOM_CALLER_LOCAL] as AuthorRecord | undefined;
+  return caller !== undefined && isOwnerRecord(caller, readOwnerAccount()?.id ?? null);
 }
