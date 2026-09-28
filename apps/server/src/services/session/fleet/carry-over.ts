@@ -3,10 +3,16 @@
  * (spec `claude-account-fleet` D9, "Carry-over").
  *
  * The new session runs in the source session's folder (and for its agent), on
- * the chosen account, on Claude Code. Its settings row is written first with
- * the source's model, effort and permission mode, so it has no more power than
- * the session it continues; it starts under the `account-handoff` origin, which
- * seeds nothing of its own. Its first message carries a background seed: the
+ * the chosen account, on the source's runtime. Its settings row is written
+ * first with the source's model, effort and permission mode, so it has no more
+ * power than the session it continues; it starts under the `account-handoff`
+ * origin, which seeds nothing of its own. On ANOTHER runtime (an account the
+ * advisor offered there), the target runtime picks its own model and effort,
+ * and the mode is the source's trust stop capped at `act`
+ * (`carry-over-power.ts`).
+ *
+ * An automatic carry-over (the advisor's `auto` plan, fired by core) has
+ * nobody watching: it runs unattended and counts against the launch cap. Its first message carries a background seed: the
  * advisor's (`carryOver`), else the default summary, which no model writes.
  * The source's plan then points at the new session, and one Activity entry
  * records who moved it, from which account to which.
@@ -16,6 +22,7 @@
 import { randomUUID } from 'node:crypto';
 import type { MeshCore } from '@dorkos/mesh';
 import { sessionPath } from '@dorkos/shared/session-link';
+import { LEDGER_RUNTIMES, type LedgerRuntime } from '@dorkos/shared/account-usage';
 import { logger } from '../../../lib/logger.js';
 import type { ActivityService } from '../../activity/activity-service.js';
 import { runtimeRegistry } from '../../core/runtime-registry.js';
@@ -36,6 +43,8 @@ import {
   writePlan,
 } from './limit-plans.js';
 import type { StoredSessionLimit } from './session-limit-store.js';
+import { crossRuntimePermissionMode } from './carry-over-power.js';
+import { episodeKey } from './continue-in-flight.js';
 
 /** The first message of a carried-over session when the advisor gives none (spec D9, quoted). */
 export const CARRY_OVER_PROMPT =
@@ -43,6 +52,9 @@ export const CARRY_OVER_PROMPT =
 
 /** The client id a carry-over's first message is sent as. */
 const CARRY_OVER_CLIENT_ID = 'account-handoff';
+
+/** The runtime whose sessions carry usage limits, and so are carried over. */
+const SOURCE_RUNTIME = 'claude-code';
 
 /** Why a carry-over could not start, with the status a route answers. */
 export class CarryOverError extends Error {
@@ -74,8 +86,13 @@ export interface CarryOverRequest {
   targetAccountId: string;
   /** Who asked. */
   by: CarryOverActor;
-  /** The new session's model, when chosen; else the source's. */
+  /** The new session's model, when chosen; else the source's (same runtime) or the target's default. */
   model?: string;
+  /**
+   * The runtime the new session runs on; the source's own when absent. The
+   * caller has already checked the advisor offered the account there.
+   */
+  targetRuntime?: string;
   /** What starting a session needs from the app. */
   launch: { meshCore: MeshCore | undefined; roomSessionPlace: RoomSessionPlacePort | undefined };
   /** The Activity feed writer, when the server has one. */
@@ -83,14 +100,23 @@ export interface CarryOverRequest {
 }
 
 /** What an account is called, for the summary and the Activity entry. */
-function accountLabelOf(accountId: string | null, accountPath: string | null): string {
+function accountLabelOf(
+  accountId: string | null,
+  accountPath: string | null,
+  runtime: string = SOURCE_RUNTIME
+): string {
   const store = getAccountUsageStore();
+  const ledger = (LEDGER_RUNTIMES as readonly string[]).includes(runtime)
+    ? (runtime as LedgerRuntime)
+    : null;
   try {
-    const usage = accountId
-      ? store?.peek('claude-code', [accountId])[0]
-      : accountPath
-        ? store?.usageAtPath('claude-code', accountPath)
-        : undefined;
+    const usage = !ledger
+      ? undefined
+      : accountId
+        ? store?.peek(ledger, [accountId])[0]
+        : accountPath
+          ? store?.usageAtPath(ledger, accountPath)
+          : undefined;
     if (usage?.label) return usage.label;
   } catch {
     // Fall through to the plain description.
@@ -161,12 +187,14 @@ export function recordCarryOverActivity(
     sourceSessionId: string;
     fromAccountId: string | null;
     toAccountId: string;
+    /** The runtime the new session runs on, when not the source's. */
+    toRuntime?: string;
     newSessionId: string;
   }
 ): void {
   if (!activity) return;
   const from = accountLabelOf(entry.fromAccountId, null);
-  const to = accountLabelOf(entry.toAccountId, null);
+  const to = accountLabelOf(entry.toAccountId, null, entry.toRuntime);
   void activity
     .emit({
       actorType: entry.by === 'person' ? 'user' : 'system',
@@ -184,9 +212,68 @@ export function recordCarryOverActivity(
         newSessionId: entry.newSessionId,
         fromAccountId: entry.fromAccountId,
         toAccountId: entry.toAccountId,
+        toRuntime: entry.toRuntime ?? SOURCE_RUNTIME,
       },
     })
     .catch(() => undefined);
+}
+
+/** How long to wait before each retry of a pointer write that failed. */
+export const POINTER_RETRY_DELAYS_MS = [1_000, 5_000] as const;
+
+/**
+ * New sessions already started for a limit episode whose source plan does not
+ * point at them yet (the pointer write failed), keyed by episode. In memory
+ * only, like the timers: every continue for that episode answers with this
+ * session instead of starting another. Dropped once the pointer lands.
+ */
+const unpointed = new Map<string, string>();
+
+/**
+ * The session a carry-over already started for this episode while its source
+ * plan does not point at it yet, if any.
+ *
+ * @param stored - The source's stored limit.
+ */
+export function unpointedCarryOver(stored: StoredSessionLimit): string | undefined {
+  return unpointed.get(episodeKey(stored));
+}
+
+/** Forget every unpointed carry-over (shutdown and tests). */
+export function clearUnpointedCarryOvers(): void {
+  unpointed.clear();
+}
+
+/**
+ * Try the pointer again, 1 s and then 5 s later: it is idempotent through the
+ * compare-and-set, and lands over whatever plan is there unless the episode is
+ * gone or already continued.
+ */
+function retryPointer(
+  source: StoredSessionLimit,
+  newSessionId: string,
+  accountId: string,
+  attempt = 0
+): void {
+  const delay = POINTER_RETRY_DELAYS_MS[attempt];
+  const key = episodeKey(source);
+  if (delay === undefined) {
+    logger.error('[carry-over] gave up pointing the old session at the new one', {
+      sourceSessionId: source.sessionId,
+      newSessionId,
+    });
+    return;
+  }
+  const timer = setTimeout(() => {
+    if (unpointed.get(key) !== newSessionId) return;
+    pointAtNewSession(source, newSessionId, accountId).then(
+      () => {
+        if (unpointed.get(key) === newSessionId) unpointed.delete(key);
+      },
+      () => retryPointer(source, newSessionId, accountId, attempt + 1)
+    );
+  }, delay);
+  timer.unref?.();
 }
 
 /**
@@ -238,30 +325,61 @@ export async function carryOverSession(request: CarryOverRequest): Promise<strin
     );
   }
   const settings = (await runtimeRegistry.getSessionSettings(source.sessionId)) ?? {};
+  const sourceRuntime = await runtimeRegistry
+    .getSessionRuntimeType(source.sessionId)
+    .catch(() => SOURCE_RUNTIME);
+  const targetRuntime = request.targetRuntime ?? sourceRuntime;
+  const crossRuntime = targetRuntime !== sourceRuntime;
+  const capabilities = runtimeRegistry.getAllCapabilities();
   const newId = randomUUID();
-  // Before the send: the copied row is the new session's power, and the
+  // Before the send: the row is the new session's power, and the
   // `account-handoff` origin claims it without adding the operator's stop.
-  await runtimeRegistry.saveSessionSettings(newId, {
-    ...(request.model ? { model: request.model } : settings.model ? { model: settings.model } : {}),
-    ...(settings.effort ? { effort: settings.effort } : {}),
-    ...(settings.permissionMode ? { permissionMode: settings.permissionMode } : {}),
-  });
+  if (crossRuntime) {
+    // The target runtime's own model and effort defaults (the bind seeds them);
+    // the source's stop, capped at `act`, in the target's vocabulary.
+    const permissionMode = crossRuntimePermissionMode(
+      settings.permissionMode,
+      capabilities[sourceRuntime]?.permissionModes,
+      capabilities[targetRuntime]?.permissionModes
+    );
+    await runtimeRegistry.saveSessionSettings(newId, {
+      ...(request.model ? { model: request.model } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+    });
+  } else {
+    await runtimeRegistry.saveSessionSettings(newId, {
+      ...(request.model
+        ? { model: request.model }
+        : settings.model
+          ? { model: settings.model }
+          : {}),
+      ...(settings.effort ? { effort: settings.effort } : {}),
+      ...(settings.permissionMode ? { permissionMode: settings.permissionMode } : {}),
+    });
+  }
   const { seedContext, prompt } = await seedFor(source, cwd, targetAccountId);
   const agentPath = await verifiedAgentPath(source.sessionId, launch.meshCore);
+  // Nobody is watching a move the advisor's plan made: it runs like a timer-
+  // fired schedule, and counts against the cap on sessions nobody typed into.
+  const automatic = by === 'advisor';
   const result = await dispatchSessionMessage({
     origin: { kind: 'account-handoff' },
     sessionId: newId,
     request: {
       content: prompt,
       cwd,
-      runtime: 'claude-code',
-      account: targetAccountId,
+      runtime: targetRuntime,
+      // A runtime without accounts runs on this computer's own sign-in.
+      ...(!crossRuntime || capabilities[targetRuntime]?.supportsAccounts
+        ? { account: targetAccountId }
+        : {}),
       seedContext,
       ...(agentPath ? { agentPath } : {}),
     },
     clientId: CARRY_OVER_CLIENT_ID,
     meshCore: launch.meshCore,
     roomSessionPlace: launch.roomSessionPlace,
+    ...(automatic ? { countsTowardLaunchCap: true, unattended: true } : {}),
   });
   if (isSessionLaunchRefusal(result)) {
     throw new CarryOverError(409, result.refused, result.message);
@@ -274,12 +392,28 @@ export async function carryOverSession(request: CarryOverRequest): Promise<strin
     );
   }
   const newSessionId = result.canonicalId;
-  await pointAtNewSession(source, newSessionId, targetAccountId);
+  // The new session is running: from here on nothing may reject, or a caller
+  // that retries (the automatic handoff's re-fire, a person's second click)
+  // would start a second one. A failed pointer is logged; the session stands.
+  // Until the pointer lands, the episode remembers the new session in memory,
+  // so a second continue answers with it rather than starting another.
+  try {
+    await pointAtNewSession(source, newSessionId, targetAccountId);
+  } catch (err) {
+    logger.error('[carry-over] started the new session but could not point the old one at it', {
+      sourceSessionId: source.sessionId,
+      newSessionId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    unpointed.set(episodeKey(source), newSessionId);
+    retryPointer(source, newSessionId, targetAccountId);
+  }
   recordCarryOverActivity(request.activity, {
     by,
     sourceSessionId: source.sessionId,
     fromAccountId: source.limit.accountId,
     toAccountId: targetAccountId,
+    ...(crossRuntime ? { toRuntime: targetRuntime } : {}),
     newSessionId,
   });
   logger.info('[carry-over] continued a limited session on another account', {
@@ -287,6 +421,7 @@ export async function carryOverSession(request: CarryOverRequest): Promise<strin
     newSessionId,
     by,
     to: targetAccountId,
+    runtime: targetRuntime,
   });
   return newSessionId;
 }

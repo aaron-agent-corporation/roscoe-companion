@@ -73,6 +73,13 @@ export interface DispatchSessionMessageOpts {
    * slot taken is refused with `LAUNCH_CAP_FULL` before anything is written.
    */
   countsTowardLaunchCap?: boolean;
+  /**
+   * Nobody is watching THIS turn (an automatic carry-over), so it runs like a
+   * timer-fired schedule: an approval card does not hold it, and an ask raised
+   * in it is refused rather than waited on. Per turn, never stored on the
+   * session: a person's next message there asks and holds as usual.
+   */
+  unattended?: boolean;
 }
 
 /**
@@ -243,7 +250,7 @@ export async function dispatchSessionMessage(
 async function launchSessionMessage(
   opts: DispatchSessionMessageOpts
 ): Promise<DispatchSessionMessageResult> {
-  const { sessionId, clientId, meshCore, roomSessionPlace, origin, onSettled } = opts;
+  const { sessionId, clientId, meshCore, roomSessionPlace, origin, onSettled, unattended } = opts;
   const {
     content,
     cwd,
@@ -468,6 +475,7 @@ async function launchSessionMessage(
       // Absent means `queue`, which is also what every disposition resolves to
       // until the native rungs land (P4). The receipt says which it was.
       ...(disposition ? { disposition } : {}),
+      ...(unattended ? { unattended: true } : {}),
       projector,
       runtime,
       onError: (err) => {

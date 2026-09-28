@@ -7,12 +7,14 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import type { MeshCore } from '@dorkos/mesh';
 
+const fakeRuntime = { getCapabilities: () => ({}), ensureSession: vi.fn() };
+
 vi.mock('../../../core/runtime-registry.js', () => ({
   runtimeRegistry: {
     has: vi.fn(() => true),
     getDefaultType: vi.fn(() => 'claude-code'),
     persistSessionRuntime: vi.fn(async () => true),
-    resolveForSession: vi.fn(async () => ({ getCapabilities: () => ({}) })),
+    resolveForSession: vi.fn(async () => fakeRuntime),
   },
 }));
 vi.mock('../../../core/usage-reporter.js', () => ({ reportUsageEvent: vi.fn() }));
@@ -299,6 +301,38 @@ describe('dispatchSessionMessage', () => {
         origin: { kind: 'interactive' },
       });
       expect(isSessionLaunchRefusal(result)).toBe(false);
+    });
+  });
+
+  describe('an unattended launch', () => {
+    it('marks only this turn unattended, never the session a person opens next', async () => {
+      await dispatchSessionMessage({
+        sessionId: SESSION,
+        request: { content: 'hi', cwd: '/work/project' },
+        clientId: 'c',
+        meshCore: mesh,
+        roomSessionPlace: undefined,
+        origin: { kind: 'account-handoff' },
+        unattended: true,
+      });
+
+      // A session created unattended would refuse every ask a person later
+      // raises in it: the flag rides the turn instead.
+      expect(fakeRuntime.ensureSession).not.toHaveBeenCalled();
+      expect(vi.mocked(dispatchMessage).mock.calls[0]![0].unattended).toBe(true);
+    });
+
+    it('leaves an attended launch as it was', async () => {
+      await dispatchSessionMessage({
+        sessionId: SESSION,
+        request: { content: 'hi' },
+        clientId: 'c',
+        meshCore: mesh,
+        roomSessionPlace: undefined,
+        origin: { kind: 'interactive' },
+      });
+      expect(fakeRuntime.ensureSession).not.toHaveBeenCalled();
+      expect(vi.mocked(dispatchMessage).mock.calls[0]![0].unattended).toBeUndefined();
     });
   });
 });

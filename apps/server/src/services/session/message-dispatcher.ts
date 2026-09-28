@@ -804,6 +804,11 @@ export interface DispatchMessageOpts {
   /** Server-owned receipt for a protected automatic follow-up. */
   privateReceiptId?: string;
   /**
+   * Nobody is watching THIS turn. Passed straight through; see
+   * {@link TriggerTurnOpts.unattended}.
+   */
+  unattended?: boolean;
+  /**
    * What to do when the session already has a turn open.
    *
    * - `'queue'` (default) — accept it and run it when the session frees up. The
@@ -993,6 +998,7 @@ interface DispatchPlan {
     | 'onSettled'
     | 'onTurnStart'
     | 'privateReceiptId'
+    | 'unattended'
   >;
 }
 
@@ -1285,6 +1291,7 @@ function launchDispatch(
         : {}),
       ...(turn.stallTimeoutMs !== undefined ? { stallTimeoutMs: turn.stallTimeoutMs } : {}),
       ...(turn.privateReceiptId !== undefined ? { privateReceiptId: turn.privateReceiptId } : {}),
+      ...(turn.unattended ? { unattended: true } : {}),
       // The turn is running: THIS is the instant the message stops waiting, and
       // every window is told so in the same beat — a queue chip that outlives
       // the message it stands for is a lie about what is still waiting.

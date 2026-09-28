@@ -1645,7 +1645,7 @@ describe('counting the stops auto mode makes on DorkOS tools', () => {
 
 describe('an ask nobody can answer is refused the moment it is raised', () => {
   const DENIAL =
-    'Nobody is available to approve this on a scheduled run. ' +
+    'Nobody is available to approve this right now. ' +
     'Do what you can without it and say what you skipped.';
 
   /** The refusal record a handler pushed, if it pushed one. */
@@ -1676,6 +1676,26 @@ describe('an ask nobody can answer is refused the moment it is raised', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('refuses in a turn nobody is watching, and asks again in the next one', async () => {
+    // An automatic carry-over's first turn has nobody to ask; the person who
+    // opens that session next does. The flag is the turn's, not the session's.
+    const session = makeBareSession({ unattendedTurn: true });
+    await expect(
+      handleToolApproval(session, 'turn-1', 'Bash', { command: 'ls' }, {
+        signal: new AbortController().signal,
+        toolUseID: 'turn-1',
+      } as ToolApprovalContext)
+    ).resolves.toEqual({ behavior: 'deny', message: DENIAL });
+
+    // The next send reassigns it; that turn's approval waits for its person.
+    session.unattendedTurn = false;
+    void handleToolApproval(session, 'turn-2', 'Bash', { command: 'ls' }, {
+      signal: new AbortController().signal,
+      toolUseID: 'turn-2',
+    } as ToolApprovalContext);
+    expect(session.pendingInteractions.get('turn-2')?.type).toBe('approval');
   });
 
   it('records the refusal under a reason only DorkOS writes', async () => {

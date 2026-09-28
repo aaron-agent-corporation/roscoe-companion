@@ -555,6 +555,14 @@ export interface TriggerTurnOpts {
   messageId?: string;
   /** Server-owned receipt for a protected automatic follow-up. */
   privateReceiptId?: string;
+  /**
+   * Nobody is watching THIS turn (an automatic carry-over to another
+   * account): an approval card does not hold it (spec `agent-permissions` D6)
+   * and an ask raised in it is refused at once. Sent as the runtime's
+   * per-turn `unattendedApprovals` and `unattended`, so a person's next turn
+   * in the same session asks and holds as usual.
+   */
+  unattended?: boolean;
   /** The projector for `sessionId` (keyed by the client-facing id, which is stable). */
   projector: SessionStateProjector;
   deps: TriggerTurnDeps;
@@ -862,7 +870,10 @@ export async function triggerTurn(opts: TriggerTurnOpts): Promise<TriggerTurnRes
         // for an approval card and it must not hold for one (spec
         // `agent-permissions` D6). The card still reaches the inbox, and the
         // verdict wakes the session.
-        ...(opts.privateReceiptId !== undefined ? { unattendedApprovals: true } : {}),
+        ...(opts.privateReceiptId !== undefined || opts.unattended === true
+          ? { unattendedApprovals: true }
+          : {}),
+        ...(opts.unattended === true ? { unattended: true } : {}),
         ...settings,
         // After `settings`, and it cannot collide with it: that type has no
         // permission key. See the field's docblock for why it is not in there.

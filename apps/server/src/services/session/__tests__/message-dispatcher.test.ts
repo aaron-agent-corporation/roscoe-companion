@@ -275,6 +275,30 @@ describe('dispatchMessage — a busy session queues the message', () => {
     expect(vi.mocked(runtime.sendMessage).mock.calls[0]![2]).not.toHaveProperty('forAgent');
   });
 
+  it('hands a turn nobody is watching to the runtime as unattended, queued or not', async () => {
+    // An automatic carry-over to another account runs like a timer-fired
+    // schedule: an approval card must not hold its turn (spec
+    // `claude-account-fleet` D9). A queued turn is rebuilt by NAME, so the
+    // field has to survive the queue too.
+    const first = gate();
+    runtime.withScenarios([heldTurn(first.wait), quickTurn()]);
+
+    await send('long turn');
+    await send('carried over', { unattended: true });
+    first.open();
+    await settle();
+
+    expect(runtime.sendMessage).toHaveBeenLastCalledWith(
+      session,
+      'carried over',
+      expect.objectContaining({ unattendedApprovals: true, unattended: true })
+    );
+    expect(vi.mocked(runtime.sendMessage).mock.calls[0]![2]).not.toHaveProperty(
+      'unattendedApprovals'
+    );
+    expect(vi.mocked(runtime.sendMessage).mock.calls[0]![2]).not.toHaveProperty('unattended');
+  });
+
   it('dispatches queued messages in queue order, one at a time', async () => {
     const gates = [gate(), gate(), gate()];
     const order: string[] = [];

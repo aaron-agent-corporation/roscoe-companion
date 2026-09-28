@@ -18,7 +18,8 @@
  *   every newly registered advisor for rows nobody claimed.
  * - **A claimed handoff settles in 10 minutes**: a claimed `auto` plan with no
  *   `markContinued` 10 minutes after `fireAt` goes back to `ask`. The timer is
- *   in memory, and at boot every `auto` plan reads `ask`.
+ *   in memory, and at boot every `auto` plan reads `ask`. An UNCLAIMED `auto`
+ *   plan is core's own handoff: the continue service fires it at `fireAt`.
  *
  * Every write goes to the `session_limits` row first (the truth, read by every
  * route) and is then pushed onto the session's live stream, when it has one.
@@ -61,7 +62,7 @@ export const CORE_AUTO_RESUME_AVAILABLE = false;
 export const CLAIMED_HANDOFF_SETTLE_MS = 10 * 60_000;
 
 /** The runtime whose sessions carry usage limits today. */
-const LIMIT_RUNTIME = 'claude-code';
+export const LIMIT_RUNTIME = 'claude-code';
 
 /** The clock, swappable in tests. */
 let now: () => Date = () => new Date();
@@ -118,6 +119,25 @@ export async function isClaudeCodeLimit(stored: StoredSessionLimit): Promise<boo
   try {
     const resolved = await runtimeRegistry.resolveSessionRuntime(stored.sessionId);
     return resolved.bound && resolved.type === LIMIT_RUNTIME;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * {@link isClaudeCodeLimit}, read synchronously from the binding row, for a
+ * caller that must decide in the same step it acts (the automatic handoff's
+ * timer and fire, which mark their move in flight before any await). The same
+ * answer: bound to Claude Code, deny by default.
+ *
+ * @param stored - The session's stored limit.
+ */
+export function isClaudeCodeLimitNow(stored: StoredSessionLimit): boolean {
+  try {
+    return (
+      runtimeRegistry.getSessionBindings([stored.sessionId]).get(stored.sessionId)?.runtime ===
+      LIMIT_RUNTIME
+    );
   } catch {
     return false;
   }
@@ -271,6 +291,12 @@ interface PlanWriteExtras {
   modelFallback?: string | undefined;
   /** The advisor that claimed the session (planning only). */
   claimedBy?: string | null;
+  /**
+   * Called after the state is derived and right before the write, with no
+   * await in between: throwing refuses the write. For a decision that must not
+   * land once something else started (a person's wait while a move runs).
+   */
+  beforeCommit?: () => void;
 }
 
 /**
@@ -300,6 +326,7 @@ export async function writePlan(
     ...(extras.claimedBy !== undefined ? { claimedBy: extras.claimedBy } : {}),
   };
   const derived = await deriveFor(next, modelFallback);
+  extras.beforeCommit?.();
   const written = commit(store, stored, next, derived, modelFallback, extras.claimedBy, true);
   if (written) return written;
   const now = store.get(stored.sessionId);
@@ -528,21 +555,16 @@ async function planEpisode(stored: StoredSessionLimit): Promise<void> {
         resumeAt: answer.resumeAt ?? stored.limit.resetsAt,
         autoResume: claimedBy !== null || CORE_AUTO_RESUME_AVAILABLE,
       };
-    } else if (answer?.mode === 'auto' && claimedBy) {
+    } else if (answer?.mode === 'auto') {
       // A claimed session's automatic handoff is flow's to run: core shows the
-      // countdown and settles it if flow never reports back.
+      // countdown and settles it if flow never reports back. An unclaimed one
+      // is core's: the continue service arms its timer when this plan is
+      // written (`delaySeconds` is already clamped to 0..3600).
       plan = {
         mode: 'auto',
         target: answer.target,
         fireAt: new Date(now().getTime() + answer.delaySeconds * 1000).toISOString(),
       };
-    } else if (answer?.mode === 'auto') {
-      // Core's own automatic carry-over is the next slice of this task; until
-      // it lands, an unclaimed session asks the person instead.
-      logger.info('[limit-plans] automatic carry-over is not available yet; asking instead', {
-        sessionId: stored.sessionId,
-        target: answer.target,
-      });
     }
   }
   const written = await writePlan(stored, plan, { modelFallback, claimedBy });
