@@ -543,6 +543,8 @@ import {
   setStagedContextStore,
   SessionLimitStore,
   setSessionLimitStore,
+  startLimitPlanning,
+  installContinueService,
   getMessageQueueStore,
   getStagedContextStore,
   reconcileSessionRows,
@@ -578,6 +580,8 @@ const PORT = env.DORKOS_PORT;
 // Global references for graceful shutdown
 let claudeRuntime: ClaudeCodeRuntime | null = null;
 let accountUsageStore: AccountUsageStore | undefined;
+/** Stops the out-of-usage planner and the continue service (spec claude-account-fleet D9). */
+let stopSessionContinuation: (() => void) | undefined;
 // The relay's DEFAULT runtime — what answers a relay message that names no
 // runtime at all (a legacy `relay.agent.<sessionId>` subject, a direct
 // agent-to-agent send to a mesh agent). The relay carries every registered
@@ -1253,6 +1257,18 @@ async function start() {
 
   // A finished turn, and the history row an error leaves when it clears.
   watchSessionLifecycle();
+  // What happens next when a session's account runs out: its plan and state,
+  // the advisor's claims, and the recorder behind `accounts.markContinued`
+  // (spec claude-account-fleet D9 and §X). After the usage store, which it
+  // watches, and the Activity feed, which records each move.
+  {
+    const stopPlanning = startLimitPlanning();
+    const uninstallContinue = installContinueService({ activity: activityService });
+    stopSessionContinuation = () => {
+      stopPlanning();
+      uninstallContinue();
+    };
+  }
   // How every Ask ended — including the ones nobody answered.
   watchAskResolution();
   // A runtime whose sign-in stopped working, noticed at whichever turn trips
@@ -5546,6 +5562,8 @@ async function start() {
 async function shutdownServices() {
   await workspaceReconcilerLifecycle.dispose();
   logger.info('[DorkOS] shutting down services');
+  stopSessionContinuation?.();
+  stopSessionContinuation = undefined;
   if (accountUsageStore) {
     accountUsageStore.stop();
     await accountUsageStore.flush().catch((err: unknown) => {
