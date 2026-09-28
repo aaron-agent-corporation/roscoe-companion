@@ -20,6 +20,15 @@
       "linearIssue": "DOR-2086"
     },
     {
+      "id": "260928-001608",
+      "slug": "cloud-instance-identity-adoption",
+      "title": "Adopt authoritative Cloud instance identity",
+      "created": "2026-09-27",
+      "status": "specified",
+      "project": "DorkOS Cloud",
+      "linearIssue": "DOR-2348"
+    },
+    {
       "id": "260928-001526",
       "slug": "central-workspace-disposal",
       "title": "Central adoption of workspace reconciliation disposal",
