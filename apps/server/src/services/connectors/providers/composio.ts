@@ -24,25 +24,25 @@
 import { createHash } from 'node:crypto';
 import type { ConnectorEventCapability } from '@dorkos/shared/connector-events';
 import { composioEventCapability } from './composio-events.js';
-import {
-  CONNECTOR_SIGN_IN_ENDED_MESSAGE,
-  type ConnectorCapabilities,
-  type ConnectorExternalAccountRef,
-  type ConnectorKeyKind,
-  type ConnectorProvider,
-  type ConnectorProviderInstanceId,
-  type ConnectorSignInEndedCode,
-  type ConnectorToolkit,
-  type ConnectPoll,
-  type ConnectStart,
-  type ProviderConnectedAccount,
-} from '@dorkos/shared/connector-provider';
 import type {
-  ConnectorCatalogPageRequest,
-  ConnectorOperationPageRequest,
-  ConnectorProviderExecuteCommand,
-  ConnectorProviderExecuteResult,
-  ConnectorUnsupportedResult,
+  ConnectorCapabilities,
+  ConnectorExternalAccountRef,
+  ConnectorKeyKind,
+  ConnectorProvider,
+  ConnectorProviderInstanceId,
+  ConnectorSignInEndedCode,
+  ConnectorToolkit,
+  ConnectPoll,
+  ConnectStart,
+  ProviderConnectedAccount,
+} from '@dorkos/shared/connector-provider';
+import {
+  CONNECTION_READINESS_COPY,
+  type ConnectorCatalogPageRequest,
+  type ConnectorOperationPageRequest,
+  type ConnectorProviderExecuteCommand,
+  type ConnectorProviderExecuteResult,
+  type ConnectorUnsupportedResult,
 } from '@dorkos/shared/connector-schemas';
 import {
   ComposioSdkClient,
@@ -345,7 +345,7 @@ export class ComposioConnectorProvider implements ConnectorProvider {
       // signal DorkOS records as a signed-out account. A rate limit, an outage
       // or a refused operation never reaches here.
       const ended = signInEndedCode(state.status);
-      if (ended) return this._executionError(ended, CONNECTOR_SIGN_IN_ENDED_MESSAGE);
+      if (ended) return this._executionError(ended, CONNECTION_READINESS_COPY.signed_out.agent);
     } catch (error) {
       if (error instanceof ComposioApiError && error.status === 404) {
         return this._executionError(

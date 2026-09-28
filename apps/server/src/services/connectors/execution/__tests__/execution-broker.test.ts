@@ -1,4 +1,5 @@
 /** Live authority and retry invariants for the DorkOS connector broker. */
+import { CONNECTION_READINESS_COPY } from '@dorkos/shared/connector-schemas';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   connectionOperationGrants,
@@ -21,7 +22,6 @@ import {
   type ConnectorProviderExecuteResult,
 } from '@dorkos/shared/connector-schemas';
 import {
-  CONNECTOR_SIGN_IN_ENDED_MESSAGE,
   type ConnectorExternalAccountRef,
   type ConnectorProvider,
 } from '@dorkos/shared/connector-provider';
@@ -1217,18 +1217,21 @@ describe('ConnectorExecutionBroker', () => {
         provider.results.push({
           status: 'error',
           code,
-          message: CONNECTOR_SIGN_IN_ENDED_MESSAGE,
+          message: CONNECTION_READINESS_COPY.signed_out.agent,
           retryable: false,
         });
 
         await expect(execute()).resolves.toMatchObject({
-          result: { status: 'error', code, message: CONNECTOR_SIGN_IN_ENDED_MESSAGE },
+          result: { status: 'error', code, message: CONNECTION_READINESS_COPY.signed_out.agent },
         });
         expect(signInOf()).toEqual({ status, lastVerifiedAt: expect.any(String) });
 
         // The next call is refused before it reaches the service, with the same one fix.
         await expect(execute()).rejects.toMatchObject({
-          payload: { code: 'CONNECTOR_SIGN_IN_ENDED', error: CONNECTOR_SIGN_IN_ENDED_MESSAGE },
+          payload: {
+            code: 'CONNECTOR_SIGN_IN_ENDED',
+            error: CONNECTION_READINESS_COPY.signed_out.agent,
+          },
         });
         expect(provider.commands).toHaveLength(1);
       }

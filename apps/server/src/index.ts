@@ -3333,7 +3333,7 @@ async function start() {
     keptLogos: () => catalogLogos.keptServiceIds(),
     recoverManagedProvider: () => connectorBootstrapper.recoverManagedCloud(),
     appConnections: () => connectorBootstrapper.appConnections(),
-    wayProblem: (providerInstanceId) => connectorBootstrapper.wayProblem(providerInstanceId),
+    wayHealth: (providerInstanceId) => connectorBootstrapper.wayHealth(providerInstanceId),
     ...(adapterManager && { relay: adapterManager }),
     agentOwnership: { ownsAgent: connectorOwnsAgent },
     managedUsage: getCloudLinkManager(),
@@ -3352,9 +3352,12 @@ async function start() {
       },
     },
   });
-  const connectorAuthorization = new ConnectorExecutionAuthorizationService(db, connectorRegistry, {
-    ownsAgent: connectorOwnsAgent,
-  });
+  const connectorAuthorization = new ConnectorExecutionAuthorizationService(
+    db,
+    connectorRegistry,
+    { ownsAgent: connectorOwnsAgent },
+    (providerInstanceId) => connectorBootstrapper.wayHealth(providerInstanceId)
+  );
   const connectorProgramPrincipals = new ConnectorProgramPrincipalService(db);
   const connectorRuntimePrincipals = meshCore
     ? new ConnectorRuntimePrincipalService({
@@ -3488,7 +3491,7 @@ async function start() {
       revalidatePrincipal: async (principal) =>
         connectorRuntimePrincipals?.revalidatePrincipal(principal) ?? false,
     },
-    (providerInstanceId) => connectorBootstrapper.wayProblem(providerInstanceId)
+    (providerInstanceId) => connectorBootstrapper.wayHealth(providerInstanceId)
   );
   const connectorBroker = new ConnectorExecutionBroker(
     connectorAuthorization,

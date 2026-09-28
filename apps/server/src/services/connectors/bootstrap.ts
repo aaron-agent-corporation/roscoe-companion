@@ -54,11 +54,20 @@ import type {
 import type {
   ConnectorAppConnections,
   ConnectorAppWay,
-  ConnectorWayProblem,
 } from '@dorkos/shared/connector-resource-schemas';
 import { logger } from '../../lib/logger.js';
 import { ManagedConnectorCloudError } from '../core/auth/cloud-link-client.js';
-import { chooseNewAppsWay, signInThroughFor, wayProblemFor } from './app-connection-way.js';
+import {
+  chooseNewAppsWay,
+  signInThroughFor,
+  wayProblemFor,
+  type ConnectorWayProblem,
+} from './app-connection-way.js';
+import {
+  keyCanFixActions,
+  wayHealthOf,
+  type ConnectionWayHealth,
+} from './readiness/connection-readiness.js';
 import type { CredentialProvider } from '../core/credential-provider.js';
 import { custodyDisclosure, MANAGED_CUSTODY_CANONICAL_SENTENCE } from './custody-disclosure.js';
 import type { ConnectorRegistry } from './registry.js';
@@ -712,6 +721,55 @@ export class ConnectorProviderBootstrapper {
     });
   }
 
+  /**
+   * The live health of the way one account goes through, as readiness reads
+   * it ({@link ConnectionWayHealth}): down with its fix when its route isn't
+   * registered, or up, and whether agents can act through it.
+   *
+   * @param providerInstanceId - The instance the account was connected through.
+   */
+  wayHealth(providerInstanceId: string): ConnectionWayHealth {
+    return wayHealthOf(
+      this._registry.resolveProviderInstance(providerInstanceId as ConnectorProvider['instanceId']),
+      () => this.wayProblem(providerInstanceId),
+      () => this._anotherWayWorks(providerInstanceId),
+      () => this.nextWayCheckAt(providerInstanceId)
+    );
+  }
+
+  /**
+   * Whether a way other than this one answers and can both sign in to apps
+   * and run their actions, so connecting an app again through it would help.
+   */
+  private _anotherWayWorks(providerInstanceId: string): boolean {
+    const instances = [
+      ...this._instanceBySpecType.values(),
+      ...(this._managedCloud ? [this._managedCloud.instanceId] : []),
+    ];
+    return instances.some((instanceId) => {
+      if (instanceId === providerInstanceId) return false;
+      const capabilities = this._registry
+        .resolveProviderInstance(instanceId as ConnectorProvider['instanceId'])
+        ?.getCapabilities().capabilities;
+      return (
+        capabilities?.authentication.status === 'available' &&
+        capabilities.execution.status === 'available'
+      );
+    });
+  }
+
+  /** A ready way's instance, whether it runs actions and, if not, whether a key would fix it. */
+  private _wayActions(
+    ready: ConnectorProvider
+  ): Pick<ConnectorAppWay, 'providerInstanceId' | 'canRunActions' | 'keyCanFix'> {
+    const canRunActions = ready.getCapabilities().capabilities.execution.status === 'available';
+    return {
+      providerInstanceId: ready.instanceId,
+      canRunActions,
+      ...(!canRunActions && { keyCanFix: keyCanFixActions(ready) }),
+    };
+  }
+
   private _way(
     kind: ConnectorAppWay['kind'],
     type: string,
@@ -724,7 +782,7 @@ export class ConnectorProviderBootstrapper {
       kind,
       type,
       status: ready ? 'ready' : 'unavailable',
-      ...(ready && { providerInstanceId: ready.instanceId }),
+      ...(ready && this._wayActions(ready)),
       ...(signInThrough !== undefined && { signInThrough }),
     };
   }

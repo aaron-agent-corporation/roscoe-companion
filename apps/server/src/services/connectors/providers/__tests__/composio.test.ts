@@ -1,9 +1,7 @@
+import { CONNECTION_READINESS_COPY } from '@dorkos/shared/connector-schemas';
 import { describe, expect, it, vi } from 'vitest';
 import { connectorConformance } from '@dorkos/test-utils';
-import {
-  CONNECTOR_SIGN_IN_ENDED_MESSAGE,
-  type ConnectorExternalAccountRef,
-} from '@dorkos/shared/connector-provider';
+import { type ConnectorExternalAccountRef } from '@dorkos/shared/connector-provider';
 import type {
   CredentialProvider,
   CredentialResolution,
@@ -410,7 +408,7 @@ describe('ComposioConnectorProvider — managed-custody semantics', () => {
       ).resolves.toEqual({
         status: 'error',
         code,
-        message: CONNECTOR_SIGN_IN_ENDED_MESSAGE,
+        message: CONNECTION_READINESS_COPY.signed_out.agent,
         retryable: false,
       });
       expect(operationClient.executions).toEqual([]);

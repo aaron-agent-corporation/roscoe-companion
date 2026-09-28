@@ -147,10 +147,6 @@ export const CONNECTOR_SIGN_IN_ENDED_CODES = {
 /** One of {@link CONNECTOR_SIGN_IN_ENDED_CODES}' codes. */
 export type ConnectorSignInEndedCode = keyof typeof CONNECTOR_SIGN_IN_ENDED_CODES;
 
-/** What an agent is told when an action needs an account whose sign-in has ended. */
-export const CONNECTOR_SIGN_IN_ENDED_MESSAGE =
-  'This account is signed out, so nothing was sent. Ask the owner to sign in again on the Connections page.';
-
 /**
  * One connected account, provider-neutral.
  *

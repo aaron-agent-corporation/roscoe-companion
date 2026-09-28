@@ -819,6 +819,7 @@ describe('ConnectorProviderBootstrapper', () => {
         type: 'composio',
         status: 'ready',
         providerInstanceId: composio.instanceId,
+        canRunActions: true,
         signInThrough: 'Composio',
       };
       expect(result).toEqual({ ways: [way], newApps: { status: 'ready', way } });
@@ -1336,6 +1337,22 @@ describe('ConnectorProviderBootstrapper', () => {
       // route this server does not set up has no fix to name.
       expect(bootstrapper.wayProblem(registry.resolveProvider('mcp')!.instanceId)).toBeUndefined();
       expect(bootstrapper.wayProblem('raw-mcp-dropped-from-config')).toBeUndefined();
+
+      // The same facts as readiness reads them: down with the fix, or unreachable.
+      // Nothing else answers and runs actions here (the key was refused too).
+      expect(bootstrapper.wayHealth('managed-provider')).toMatchObject({
+        status: 'down',
+        problem: 'dorkos_account_unavailable',
+        anotherWayWorks: false,
+      });
+      expect(bootstrapper.wayHealth('raw-mcp-dropped-from-config')).toEqual({
+        status: 'down',
+        problem: 'unreachable',
+        anotherWayWorks: false,
+      });
+      expect(bootstrapper.wayHealth(registry.resolveProvider('mcp')!.instanceId)).toMatchObject({
+        status: 'up',
+      });
     });
 
     it('says why when the saved key failed its check', async () => {
@@ -1626,6 +1643,12 @@ describe('ConnectorProviderBootstrapper', () => {
       expect(bootstrapper.nextWayCheckAt(composioInstance)).toBeUndefined();
       await bootstrapper.registerBootProviders();
       expect(bootstrapper.nextWayCheckAt(composioInstance)).toBe('2026-09-28T12:00:30.000Z');
+      // Readiness reads the same time, so the account says DorkOS is on it.
+      expect(bootstrapper.wayHealth(composioInstance)).toMatchObject({
+        status: 'down',
+        problem: 'own_key_unavailable',
+        nextCheckAt: '2026-09-28T12:00:30.000Z',
+      });
       // Another way's id, or a way DorkOS does not set up, has nothing waiting.
       expect(bootstrapper.nextWayCheckAt('unknown-instance')).toBeUndefined();
 
@@ -1643,6 +1666,7 @@ describe('ConnectorProviderBootstrapper', () => {
       failure = new ComposioApiError(401, 'Invalid API key');
       await bootstrapper.reload('composio');
       expect(bootstrapper.nextWayCheckAt(composioInstance)).toBeUndefined();
+      expect(bootstrapper.wayHealth(composioInstance)).not.toHaveProperty('nextCheckAt');
     });
 
     it.each([
