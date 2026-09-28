@@ -11,6 +11,8 @@ import {
 import { planName, type AccountWindow } from '@/layers/shared/lib';
 import type { SessionAccount } from '../model/use-session-account';
 import { canOfferContinue, popoverWindowLabel } from '../lib/account-chip';
+import { newestObservedAt, readableWindows } from '../lib/account-usage-status';
+import { UsageFreshnessLine } from './UsageFreshnessLine';
 
 /** Props for {@link AccountPopover}. */
 export interface AccountPopoverProps {
@@ -39,9 +41,9 @@ export interface AccountPopoverProps {
  * account with no numbers says "unknown" rather than showing nothing.
  */
 function windowsToShow(
-  account: SessionAccount
+  usage: SessionAccount['usage']
 ): { key: string; window: AccountWindow | null; label: string }[] {
-  const windows = account.usage?.windows ?? [];
+  const windows = usage?.windows ?? [];
   if (windows.length === 0) {
     return [
       { key: 'five_hour', window: null, label: popoverWindowLabel('five_hour', '') },
@@ -59,7 +61,8 @@ function windowsToShow(
  * The detail behind the status-bar account chip (spec `claude-account-ui`
  * §6.1): the account and its plan, one bar per usage window with when it
  * resets, the flow item the session serves, and, only while the session is out
- * and the server would take the move, "Continue on another account".
+ * and the server would take the move, "Continue on another account". It ends
+ * with how fresh the numbers are (§6.8).
  */
 export function AccountPopover({
   account,
@@ -73,6 +76,10 @@ export function AccountPopover({
   const plan = planName(account.usage?.plan?.name ?? account.usage?.subscriptionType);
   const offerContinue =
     onContinue !== undefined && canOfferContinue(account.limit, account.lifecycle, account.pending);
+  // Expiry is already read (`useSessionAccount`), so "reset" matches the chip.
+  const usage = account.usage;
+  // How fresh the bars are: the newest reading among them (spec §6.8).
+  const observedAt = newestObservedAt(readableWindows(usage));
 
   return (
     // `autoFocus` is the sheet's own option, not the DOM attribute: on a phone it
@@ -97,7 +104,7 @@ export function AccountPopover({
             {plan && <span className="text-muted-foreground shrink-0 text-xs">{plan}</span>}
           </div>
           <div className="flex flex-col gap-2.5">
-            {windowsToShow(account).map(({ key, window, label }) => (
+            {windowsToShow(usage).map(({ key, window, label }) => (
               <UsageBar key={key} window={window} label={label} now={now} />
             ))}
           </div>
@@ -109,6 +116,7 @@ export function AccountPopover({
               Continue on another account →
             </Button>
           )}
+          {observedAt !== null && <UsageFreshnessLine observedAt={observedAt} now={now} />}
         </div>
       </ResponsivePopoverContent>
     </ResponsivePopover>

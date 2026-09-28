@@ -1,25 +1,26 @@
 import { Gauge, DollarSign } from 'lucide-react';
 import type { UsageStatus } from '@dorkos/shared/types';
 import { DetailRow, Tooltip, TooltipTrigger, TooltipContent } from '@/layers/shared/ui';
-import { cn } from '@/layers/shared/lib';
+import { cn, isStale } from '@/layers/shared/lib';
+import { useNow } from '@/layers/shared/model';
 import { formatCost } from '../lib/format-tokens';
+import { staleNumberClass } from '../lib/account-usage-status';
+import { UsageFreshnessLine } from './UsageFreshnessLine';
 
-interface UsageStatusItemProps {
+interface UsageDetailProps {
+  /** The runtime-neutral usage descriptor. */
   usage: UsageStatus;
 }
 
-/**
- * Whether a {@link UsageStatus} has a metric worth rendering. A subscription
- * renders when it has utilization or cost; pay-as-you-go renders when it has
- * cost. The parent gates its mount on this so an empty usage hides the item.
- *
- * @param usage - The runtime-neutral usage descriptor.
- */
-export function hasRenderableUsage(usage: UsageStatus): boolean {
-  if (usage.kind === 'subscription') {
-    return usage.utilization != null || usage.costUsd != null;
-  }
-  return usage.costUsd != null;
+interface UsageStatusItemProps extends UsageDetailProps {
+  /**
+   * When the usage was observed, ISO-8601, or nothing when that is not known
+   * (a snapshot's usage). With it, the tooltip ends with the freshness line and
+   * a reading older than an hour dims the number (spec `claude-account-ui` §6.8).
+   */
+  observedAt?: string | null;
+  /** A fixed moment to read freshness from (tests and the Dev Playground); else the clock. */
+  now?: Date;
 }
 
 /**
@@ -65,6 +66,29 @@ function costHeading(usage: UsageStatus): string {
 }
 
 /**
+ * The rows under a subscription's utilization: the session's cost (named the
+ * way every cost is, "Estimated" when no price matched), the note on how it was
+ * priced, the runtime's detail line, and "Rate limit reached" when out. Shared
+ * by {@link UsageDetail} and the `/context` reveal's window bars, so the cost
+ * reads the same everywhere.
+ *
+ * @param props - The usage descriptor whose cost to show.
+ */
+export function UsageCostRows({ usage }: UsageDetailProps) {
+  const basisNote = costBasisNote(usage);
+  return (
+    <>
+      {usage.costUsd != null && (
+        <DetailRow label={costHeading(usage)}>{`$${usage.costUsd.toFixed(2)}`}</DetailRow>
+      )}
+      {basisNote && <div className="text-muted-foreground">{basisNote}</div>}
+      {usage.detail && <div className="text-amber-500">{usage.detail}</div>}
+      {usage.state === 'exhausted' && <div className="text-red-500">Rate limit reached</div>}
+    </>
+  );
+}
+
+/**
  * The usage & cost detail body — utilization, window, resets, and cost for a
  * subscription; the cost figure for pay-as-you-go. Shared by the status-bar
  * item's hover tooltip and the pinned `/context` reveal so both read identically
@@ -72,11 +96,10 @@ function costHeading(usage: UsageStatus): string {
  *
  * @param usage - The runtime-neutral usage descriptor.
  */
-export function UsageDetail({ usage }: UsageStatusItemProps) {
+export function UsageDetail({ usage }: UsageDetailProps) {
   const basisNote = costBasisNote(usage);
   if (usage.kind === 'subscription' && usage.utilization != null) {
     const pct = Math.round(usage.utilization * 100);
-    const isExhausted = usage.state === 'exhausted';
     const resetsAtLabel = usage.resetsAt
       ? new Date(usage.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : null;
@@ -87,12 +110,7 @@ export function UsageDetail({ usage }: UsageStatusItemProps) {
           <DetailRow label="Utilization">{`${pct}%`}</DetailRow>
           {usage.windowLabel && <DetailRow label="Window">{usage.windowLabel}</DetailRow>}
           {resetsAtLabel && <DetailRow label="Resets at">{resetsAtLabel}</DetailRow>}
-          {usage.costUsd != null && (
-            <DetailRow label="Session cost">{`$${usage.costUsd.toFixed(2)}`}</DetailRow>
-          )}
-          {basisNote && <div className="text-muted-foreground">{basisNote}</div>}
-          {usage.detail && <div className="text-amber-500">{usage.detail}</div>}
-          {isExhausted && <div className="text-red-500">Rate limit reached</div>}
+          <UsageCostRows usage={usage} />
         </div>
       </div>
     );
@@ -132,7 +150,9 @@ export function UsageDetail({ usage }: UsageStatusItemProps) {
  *
  * @param props - The usage descriptor to render.
  */
-export function UsageStatusItem({ usage }: UsageStatusItemProps) {
+export function UsageStatusItem({ usage, observedAt = null, now: fixedNow }: UsageStatusItemProps) {
+  const tick = useNow();
+  const now = fixedNow ?? new Date(tick);
   const showUtilization = usage.kind === 'subscription' && usage.utilization != null;
 
   if (showUtilization) {
@@ -140,6 +160,8 @@ export function UsageStatusItem({ usage }: UsageStatusItemProps) {
     const isExhausted = usage.state === 'exhausted';
     const isWarning = usage.state === 'warning' || pct >= 80;
     const colorClass = isExhausted ? 'text-red-500' : isWarning ? 'text-amber-500' : '';
+    // An old reading keeps its number, dimmed; the tooltip says how old (Q17).
+    const stale = observedAt !== null && isStale(observedAt, now);
 
     return (
       <Tooltip>
@@ -147,13 +169,17 @@ export function UsageStatusItem({ usage }: UsageStatusItemProps) {
           <span
             className={cn('inline-flex shrink-0 cursor-default items-center gap-1', colorClass)}
             aria-label="Subscription usage"
+            data-stale={stale || undefined}
           >
             <Gauge className="size-(--size-icon-xs)" />
-            <span>{pct}%</span>
+            <span className={staleNumberClass(stale, colorClass !== '')}>{pct}%</span>
           </span>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-56">
-          <UsageDetail usage={usage} />
+          <div className="space-y-1">
+            <UsageDetail usage={usage} />
+            {observedAt !== null && <UsageFreshnessLine observedAt={observedAt} now={now} />}
+          </div>
         </TooltipContent>
       </Tooltip>
     );

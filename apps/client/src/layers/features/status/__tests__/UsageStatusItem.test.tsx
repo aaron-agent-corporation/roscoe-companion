@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
 import { TooltipProvider } from '@/layers/shared/ui';
 import type { UsageStatus } from '@dorkos/shared/types';
-import { UsageStatusItem, UsageDetail, hasRenderableUsage } from '../ui/UsageStatusItem';
+import { UsageStatusItem, UsageDetail } from '../ui/UsageStatusItem';
+import { hasRenderableUsage } from '../lib/account-usage-status';
 
 afterEach(cleanup);
 
@@ -246,5 +248,59 @@ describe('UsageDetail — the sentence beside the figure', () => {
       }
     );
     expect(screen.queryByText(/Estimated/)).not.toBeInTheDocument();
+  });
+});
+
+describe('UsageStatusItem — freshness (spec claude-account-ui §6.8)', () => {
+  const NOW = new Date('2026-09-28T12:00:00.000Z');
+  const usage: UsageStatus = {
+    kind: 'subscription',
+    utilization: 0.4,
+    windowLabel: '5-hour window',
+    state: 'ok',
+  };
+  const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000).toISOString();
+
+  it('takes a stale healthy number a step lighter past 60 minutes', () => {
+    render(<UsageStatusItem usage={usage} observedAt={minutesAgo(61)} now={NOW} />, {
+      wrapper: Wrapper,
+    });
+    // The line is already muted, so a healthy number needs the lighter step to show.
+    expect(screen.getByText('40%')).toHaveClass('text-muted-foreground/70');
+    expect(screen.getByLabelText('Subscription usage')).not.toHaveClass('text-muted-foreground/70');
+  });
+
+  it('does not dim a fresh healthy number at 59 minutes', () => {
+    render(<UsageStatusItem usage={usage} observedAt={minutesAgo(59)} now={NOW} />, {
+      wrapper: Wrapper,
+    });
+    expect(screen.getByText('40%')).not.toHaveClass('text-muted-foreground/70');
+    expect(screen.getByText('40%')).not.toHaveClass('text-muted-foreground');
+  });
+
+  it('mutes a stale amber number rather than lightening it', () => {
+    render(
+      <UsageStatusItem
+        usage={{ ...usage, utilization: 0.91, state: 'warning' }}
+        observedAt={minutesAgo(61)}
+        now={NOW}
+      />,
+      { wrapper: Wrapper }
+    );
+    expect(screen.getByText('91%')).toHaveClass('text-muted-foreground');
+    expect(screen.getByText('91%')).not.toHaveClass('text-muted-foreground/70');
+  });
+
+  it('never dims a reading whose time is unknown', () => {
+    render(<UsageStatusItem usage={usage} now={NOW} />, { wrapper: Wrapper });
+    expect(screen.getByText('40%')).not.toHaveClass('text-muted-foreground');
+  });
+
+  it('ends the tooltip with how old the reading is', async () => {
+    render(<UsageStatusItem usage={usage} observedAt={minutesAgo(120)} now={NOW} />, {
+      wrapper: Wrapper,
+    });
+    fireEvent.focus(screen.getByLabelText('Subscription usage'));
+    expect((await screen.findAllByText('as of 2h ago')).length).toBeGreaterThan(0);
   });
 });

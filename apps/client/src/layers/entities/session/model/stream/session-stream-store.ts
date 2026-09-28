@@ -93,6 +93,32 @@ export interface SessionStreamState {
   inProgressTurn: SessionEvent[];
   /** Server-held status projection, or `null` before the first hydration. */
   status: SessionStatus | null;
+  /**
+   * `Date.now()` when a LIVE frame last set `status.usage`, or `null` when the
+   * usage held came from a snapshot (spec `claude-account-ui` §6.8).
+   *
+   * A snapshot's usage carries no time of its own, so after a reopen it may be
+   * hours old. The status bar reads this stamp to decide whether the turn's own
+   * usage is newer than its account's reading: only a frame that arrived while
+   * this window watched can be, and a snapshot never is.
+   */
+  usageArrivedAt: number | null;
+  /**
+   * Whether a usage frame arriving now can be trusted to be new, so
+   * {@link usageArrivedAt} may be stamped with `Date.now()`.
+   *
+   * Events carry no time of their own, and a `Last-Event-ID` reconnect replays
+   * the gap with nothing to mark where the replay ends. After a laptop sleeps,
+   * those replayed frames are old, and stamping them "now" would let hours-old
+   * usage beat a newer account reading. So the simplest rule that is never
+   * wrong in the harmful direction: losing the connection stops the clock, and
+   * replayed frames keep the previous stamp. It restarts on a snapshot (what
+   * follows one is the short gap after its cursor) or on the turn that carries
+   * this window's own message (every frame of that turn is after the reconnect). A frame
+   * it declines to stamp only ranks below the account's reading, which is the
+   * safe direction.
+   */
+  usageClockLive: boolean;
   /** Pending interactions awaiting the operator (ADR-0264), keyed by `id`. */
   pendingInteractions: PendingInteractionDTO[];
   /** Highest `seq` applied so far; the idempotency/gap-free watermark. */
@@ -230,6 +256,8 @@ export const DEFAULT_SESSION_STREAM_STATE: SessionStreamState = {
   queueOutcomes: {},
   inProgressTurn: [],
   status: null,
+  usageArrivedAt: null,
+  usageClockLive: true,
   pendingInteractions: [],
   lastAppliedSeq: 0,
   lastEventAt: null,
@@ -909,6 +937,21 @@ function projectEvent(session: SessionStreamState, event: SessionEvent): void {
         // …and the usage limit the last turn hit, as the projector does.
         session.status.limit = null;
       }
+      // A turn this window triggered is after any reconnect, so its usage
+      // frames are new again (see `usageClockLive`). `triggerPending` alone is
+      // not enough: a person can send while a reconnect is still replaying, and
+      // a REPLAYED turn_start from another client's turn would then match it.
+      // So the turn must also carry this window's own message. A turn whose text
+      // the server reshaped fails the match and stays unstamped, which only
+      // ranks its usage below the account's reading (the safe direction).
+      if (
+        session.triggerPending &&
+        event.origin !== 'runtime' &&
+        session.optimisticUserMessage !== null &&
+        event.userMessage === session.optimisticUserMessage.content
+      ) {
+        session.usageClockLive = true;
+      }
       // The triggered turn materialized — the trigger window is over.
       session.triggerPending = false;
       break;
@@ -957,6 +1000,11 @@ function projectEvent(session: SessionStreamState, event: SessionEvent): void {
       break;
     case 'status_change':
       session.status = mergeStatus(session.status, event.status);
+      // A live usage frame: stamp its arrival, so it can outrank the account's
+      // reading only when it is actually newer (spec `claude-account-ui` §6.8).
+      if (event.status.usage !== undefined && session.usageClockLive) {
+        session.usageArrivedAt = Date.now();
+      }
       break;
     case 'approval_required':
     case 'question_prompt':
@@ -1062,6 +1110,10 @@ export const useSessionStreamStore: SessionStreamStore = create<
             const session = touchAndGet(state, sessionId);
             session.messages = snapshot.messages;
             session.status = snapshot.status;
+            // The snapshot's usage has no time, so it never counts as live;
+            // what follows a snapshot is the short gap after its cursor.
+            session.usageArrivedAt = null;
+            session.usageClockLive = true;
             session.pendingInteractions = snapshot.pendingInteractions;
             session.inProgressTurn = snapshot.inProgressTurn ?? [];
             // Hydration replaces the queue wholesale — that is what makes it
@@ -1221,6 +1273,8 @@ export const useSessionStreamStore: SessionStreamStore = create<
           (state) => {
             const session = touchAndGet(state, sessionId);
             session.connectionState = connectionState;
+            // A lost connection means a replay is coming (see `usageClockLive`).
+            if (connectionState !== 'connected') session.usageClockLive = false;
           },
           false,
           'session-stream/setConnectionState'
@@ -1289,6 +1343,17 @@ export const useSessionStreamStore: SessionStreamStore = create<
 export function useSessionStreamState(sessionId: string): SessionStreamState {
   return useSessionStreamStore(
     useCallback((s) => s.sessions[sessionId] ?? DEFAULT_SESSION_STREAM_STATE, [sessionId])
+  );
+}
+
+/**
+ * Granular selector: when a live frame last set this session's usage
+ * (`Date.now()`), or `null` when the usage held came from a snapshot. See
+ * {@link SessionStreamState.usageArrivedAt}.
+ */
+export function useSessionUsageArrivedAt(sessionId: string): number | null {
+  return useSessionStreamStore(
+    useCallback((s) => s.sessions[sessionId]?.usageArrivedAt ?? null, [sessionId])
   );
 }
 

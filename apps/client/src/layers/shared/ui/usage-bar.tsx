@@ -104,8 +104,9 @@ function Track({
   return <FilledTrack entry={entry} tone={tone} vertical={vertical} className={className} />;
 }
 
-/** `5-hour window 40% used`, or `5-hour window usage unknown`. */
+/** `5-hour window 40% used`, `5-hour window reset`, or `5-hour window usage unknown`. */
 function windowPhrase(name: string, entry: AccountWindow | null): string {
+  if (entry?.expired) return `${name} reset`;
   if (barTone(entry) === 'unknown' || !entry) return `${name} usage unknown`;
   return `${name} ${pctText(entry)} used`;
 }
@@ -183,14 +184,25 @@ export function UsageBar({
   now,
   className,
 }: UsageBarProps) {
-  const tone = barTone(entry);
-  const unknown = tone === 'unknown' || !entry;
+  // A window whose reset has passed (spec `claude-account-ui` §6.8) is drawn
+  // as an empty bar that says "reset": its old share no longer applies, and
+  // the server reports it at 0% with its status cleared.
+  const expired = entry?.expired === true;
+  const drawn = expired && entry ? { ...entry, usedPct: 0, status: null } : entry;
+  const tone = barTone(drawn);
+  const unknown = tone === 'unknown' || !drawn;
   const reset =
-    showReset && !unknown && entry.resetsAt
-      ? formatResetTime(entry.resetsAt, now ?? new Date())
+    showReset && !unknown && !expired && drawn.resetsAt
+      ? formatResetTime(drawn.resetsAt, now ?? new Date())
       : null;
-  const valueText = unknown ? 'unknown' : `${pctText(entry)}${reset ? ` · resets ${reset}` : ''}`;
-  const sentence = `${windowPhrase(label, entry)}${reset ? `, resets ${reset}` : ''}`;
+  const valueText = unknown
+    ? 'unknown'
+    : expired
+      ? 'reset'
+      : `${pctText(drawn)}${reset ? ` · resets ${reset}` : ''}`;
+  const sentence = expired
+    ? `${label} reset`
+    : `${windowPhrase(label, drawn)}${reset ? `, resets ${reset}` : ''}`;
 
   if (compact) {
     return (
@@ -207,7 +219,7 @@ export function UsageBar({
               aria-label={sentence}
               className="flex w-[110px] shrink-0 items-center gap-1.5"
             >
-              <Track entry={entry} vertical={false} className="h-1.5 w-full rounded-full" />
+              <Track entry={drawn} vertical={false} className="h-1.5 w-full rounded-full" />
               {/* Unknown says so in words too, never only as an empty track (Q6). */}
               {unknown && <span className="text-2xs text-muted-foreground shrink-0">unknown</span>}
             </span>
@@ -230,7 +242,7 @@ export function UsageBar({
         <span className="text-foreground truncate text-xs">{label}</span>
         <span className="text-2xs text-muted-foreground shrink-0 tabular-nums">{valueText}</span>
       </div>
-      <Track entry={entry} vertical={false} className="h-1.5 w-full rounded-full" />
+      <Track entry={drawn} vertical={false} className="h-1.5 w-full rounded-full" />
     </div>
   );
 }
