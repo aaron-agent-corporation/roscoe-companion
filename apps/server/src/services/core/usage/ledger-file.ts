@@ -37,8 +37,8 @@ import path from 'node:path';
 import {
   ACCOUNT_ID_PATTERN,
   LEDGER_RUNTIMES,
-  UsageLedgerSchema,
   mergeLedger,
+  parseStoredLedger,
   type LedgerMergeWarning,
   type LedgerObservation,
   type LedgerRuntime,
@@ -413,15 +413,15 @@ export async function writeLedger(
       const base = merged.changed ? merged.ledger : existing;
       const carried = withCarriedFields(base, opts.carryFields, now);
       if (!merged.changed && carried === base) {
-        const parsed = UsageLedgerSchema.safeParse(existing);
         return {
           written: false,
           dropped: merged.warnings,
-          ledger: parsed.success ? parsed.data : null,
+          ledger: parseStoredLedger(existing).ledger,
         };
       }
       await replaceFile(dir, file, carried as UsageLedger);
-      return { written: true, dropped: merged.warnings, ledger: carried as UsageLedger };
+      // The file keeps what this version cannot read; memory gets only what it can.
+      return { written: true, dropped: merged.warnings, ledger: parseStoredLedger(carried).ledger };
     },
     opts
   );
@@ -462,8 +462,29 @@ function withCarriedFields(
 }
 
 /**
+ * The set-aside warnings already logged, by file and what was set aside. A
+ * writer never deletes an entry it cannot read, so the same file reads the same
+ * way on every watch event and every 60 s scan; one warning per distinct
+ * set-aside is enough.
+ */
+const warnedSetAside = new Set<string>();
+
+function warnSetAsideOnce(file: string, dropped: readonly string[]): void {
+  const key = `${file}\0${[...dropped].sort().join('\0')}`;
+  if (warnedSetAside.has(key)) return;
+  warnedSetAside.add(key);
+  logger.warn('[ledger-file] set aside usage ledger entries it could not read', {
+    file,
+    dropped,
+  });
+}
+
+/**
  * Read one account's ledger without a lock. Missing = `null`. A file that is not
- * a valid ledger also reads as `null`, with a warning.
+ * a version-1 ledger at all also reads as `null`, with a warning. Inside a
+ * readable file, one window or fact this version does not understand is set
+ * aside with a warning and the rest reads ({@link parseStoredLedger}), so a
+ * newer writer's entry never blanks the whole account (DOR-2471).
  *
  * @param dir - The runtime's ledger folder.
  * @param accountId - The ledger id.
@@ -480,14 +501,18 @@ export async function readLedger(dir: string, accountId: string): Promise<UsageL
     }
     return null;
   }
+  let read: ReturnType<typeof parseStoredLedger> = { ledger: null, dropped: [] };
   try {
-    const parsed = UsageLedgerSchema.safeParse(JSON.parse(text));
-    if (parsed.success) return parsed.data;
+    read = parseStoredLedger(JSON.parse(text));
   } catch {
-    // Falls through to the warning below.
+    // Unparsable JSON: falls through to the warning below.
   }
-  logger.warn('[ledger-file] a usage ledger is not valid; read it as empty', { file });
-  return null;
+  if (!read.ledger) {
+    logger.warn('[ledger-file] a usage ledger is not valid; read it as empty', { file });
+    return null;
+  }
+  if (read.dropped.length > 0) warnSetAsideOnce(file, read.dropped);
+  return read.ledger;
 }
 
 /**
