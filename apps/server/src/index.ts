@@ -519,6 +519,7 @@ import { setAccountUsageStore } from './services/core/usage/current-usage-store.
 import { installSessionStatusHydration } from './services/session/fleet/session-status-hydration.js';
 import { SessionContextStore } from './services/session/fleet/session-context-store.js';
 import { onSessionAccountLaunched } from './services/runtimes/claude-code/accounts/account-usage-feed.js';
+import { probeForReset } from './services/runtimes/claude-code/accounts/account-probe.js';
 import { moveAccountReferences } from './services/core/usage/account-reference-move.js';
 import { renameScheduleAccount } from './services/tasks/approvals/account-rename.js';
 import { isPackageOwned, packageOwnershipContext } from './services/tasks/task-file-update.js';
@@ -546,6 +547,7 @@ import {
   setSessionLimitStore,
   startLimitPlanning,
   installContinueService,
+  installResumeService,
   getMessageQueueStore,
   getStagedContextStore,
   reconcileSessionRows,
@@ -1282,7 +1284,20 @@ async function start() {
         roomSessionPlace: app.locals.roomSessionPlace as RoomSessionPlacePort | undefined,
       }),
     });
+    // Waits for an account's reset, confirms it with a reading and resumes the
+    // session by itself. After the planner, which settles pre-restart `auto`
+    // plans before this re-arms the stored waits.
+    const uninstallResume = installResumeService({
+      launchDeps: () => ({
+        meshCore: app.locals.meshCore as MeshCore | undefined,
+        roomSessionPlace: app.locals.roomSessionPlace as RoomSessionPlacePort | undefined,
+      }),
+      // Task 2.2's idle probe, for an account the store cannot confirm on its
+      // own. An account it cannot probe is still confirmed from store readings.
+      probe: probeForReset,
+    });
     stopSessionContinuation = () => {
+      uninstallResume();
       stopPlanning();
       uninstallContinue();
     };
