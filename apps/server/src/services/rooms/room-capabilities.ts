@@ -433,7 +433,8 @@ function projectEntry(rooms: RoomService, entry: RoomEntry): Record<string, unkn
     at: entry.createdAt,
     kind: entry.kind,
     authorId: entry.authorId,
-    author: sanitizeIdentity(author?.displayName ?? 'someone who has left'),
+    // The owner by name, never the registry's 'You' (DOR-2458).
+    author: sanitizeIdentity(rooms.nameForAgents(entry.authorId) ?? 'someone who has left'),
     ...(author?.handle ? { handle: sanitizeIdentity(author.handle) } : {}),
     text: entry.body.text,
     ...(entry.threadRootEntryId ? { threadRootEntryId: entry.threadRootEntryId } : {}),
@@ -460,10 +461,11 @@ function projectEntry(rooms: RoomService, entry: RoomEntry): Record<string, unkn
  * and a second cap copied to this side of the seam is a number that drifts from
  * the schema and truncates in a place nobody would think to look.
  *
+ * @param rooms - The rooms service, for naming each member as an agent reads them.
  * @param detail - The service's projection.
  * @returns The compact, label-sanitized shape a tool returns.
  */
-function projectDetail(detail: RoomDetail): Record<string, unknown> {
+function projectDetail(rooms: RoomService, detail: RoomDetail): Record<string, unknown> {
   return {
     roomId: detail.roomId,
     kind: detail.kind,
@@ -485,7 +487,8 @@ function projectDetail(detail: RoomDetail): Record<string, unknown> {
     lastActivity: detail.lastActivityAt,
     members: detail.members.map((member) => ({
       authorId: member.authorId,
-      name: sanitizeIdentity(member.name) ?? null,
+      // The owner by name, never the registry's 'You' (DOR-2458).
+      name: sanitizeIdentity(rooms.nameForAgents(member.authorId) ?? member.name) ?? null,
       ...(member.handle ? { handle: sanitizeIdentity(member.handle) } : {}),
       kind: member.kind,
     })),
@@ -1244,7 +1247,7 @@ export const roomsDomain: CapabilityDomain = {
         const detail = answering(() =>
           rooms.describeRoom(input.roomId, callerAuthor(rooms, context).id)
         );
-        return Promise.resolve(projectDetail(detail));
+        return Promise.resolve(projectDetail(rooms, detail));
       },
     }),
     defineCapability({
@@ -1321,7 +1324,7 @@ export const roomsDomain: CapabilityDomain = {
             ...(members.length > 0 ? { memberHandles: members } : {}),
           })
         );
-        return Promise.resolve({ rooms: found.map(projectDetail) });
+        return Promise.resolve({ rooms: found.map((room) => projectDetail(rooms, room)) });
       },
     }),
     defineCapability({
@@ -1437,7 +1440,7 @@ export const roomsDomain: CapabilityDomain = {
         // agent gets back from opening a room is byte-identical to the shape it
         // gets from looking one up. One projection, one set of sanitized labels.
         const detail = answering(() => rooms.describeRoom(opened.id, caller.id));
-        return Promise.resolve({ ...projectDetail(detail), created: opened.created });
+        return Promise.resolve({ ...projectDetail(rooms, detail), created: opened.created });
       },
     }),
     defineCapability({
@@ -1605,7 +1608,7 @@ export const roomsDomain: CapabilityDomain = {
           })
         );
         const detail = answering(() => rooms.describeRoom(input.roomId, caller.id));
-        return Promise.resolve(projectDetail(detail));
+        return Promise.resolve(projectDetail(rooms, detail));
       },
     }),
     defineCapability({
@@ -1891,6 +1894,6 @@ async function readFileBacked(
  */
 function authorLabel(rooms: RoomService, authorId: string): string {
   const author = rooms.authorRegistry.getById(authorId);
-  const name = author?.handle ?? author?.displayName;
-  return (name === undefined ? undefined : sanitizeIdentity(name)) ?? 'Somebody';
+  const name = author?.handle ?? rooms.nameForAgents(authorId);
+  return (name ? sanitizeIdentity(name) : undefined) ?? 'Somebody';
 }
