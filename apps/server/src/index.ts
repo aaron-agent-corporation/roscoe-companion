@@ -350,6 +350,7 @@ import { ensurePersonalMarketplace } from './services/marketplace-mcp/personal-m
 import {
   TokenConfirmationProvider,
   describeTemplateCreationCapability,
+  describeWorkspaceCreationCapability,
   type ConfirmationProvider,
 } from './services/marketplace-mcp/confirmation-provider.js';
 import type { MarketplaceMcpDeps } from './services/marketplace-mcp/marketplace-mcp-tools.js';
@@ -443,6 +444,7 @@ import {
   WorkspaceReconcilerLifecycle,
   resolveWorkspaceRoot,
   setWorkspaceManager,
+  setWorkspaceApprovals,
   setWorkspaceRoot,
   type WorkspaceStore,
 } from './services/workspace/index.js';
@@ -623,7 +625,8 @@ let schedulerService: TaskSchedulerService | null = null;
 let relayCore: RelayCore | undefined;
 /**
  * The marketplace's confirmation provider, once composed: the agents router
- * reads it for an agent's template creation card (DOR-2325).
+ * reads it for an agent's template creation card (DOR-2325), and the workspace
+ * service for a new workspace's card (DOR-2335).
  */
 let templateConfirmationProvider: ConfirmationProvider | undefined;
 /**
@@ -1730,6 +1733,14 @@ async function start() {
     });
     managedWorkspaces = workspaceStore;
     setWorkspaceManager(workspaceService);
+    // A new workspace's card is raised through the marketplace's confirmation
+    // provider, composed later in boot (DOR-2335).
+    setWorkspaceApprovals(() => templateConfirmationProvider);
+    // A clone staged by a server that stopped before deciding about it is
+    // never adopted: it goes before anything else can stage (DOR-2335).
+    const staleClones = await workspaceService.sweepStaging();
+    if (staleClones > 0)
+      logger.info(`[Workspace] cleared ${staleClones} unfinished staged clone(s)`);
     workspaceReconcilerLifecycle.start(workspaceReconciler);
     logger.info('[Workspace] WorkspaceManager registered');
   }
@@ -3037,7 +3048,8 @@ async function start() {
       return (
         describeHookProjectionCapability(capabilityId) ??
         describeGlobalActivationCapability(capabilityId) ??
-        describeTemplateCreationCapability(capabilityId)
+        describeTemplateCreationCapability(capabilityId) ??
+        describeWorkspaceCreationCapability(capabilityId)
       );
     },
   });
