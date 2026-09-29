@@ -404,6 +404,9 @@ const schema = z.object({
   COMMUNITY_EXPORT_MAX_HOURS: between(1, 24, 168),
   COMMUNITY_EXPORT_CONCURRENCY: between(1, 1, 8),
   COMMUNITY_IMPORT_UPLOADS: integer('COMMUNITY_IMPORT_UPLOADS', 2, 16),
+  COMMUNITY_IMPORT_PART_CONCURRENCY: between(1, 8, 64),
+  COMMUNITY_IMPORT_MAX_BYTES: between(MIB, 1024 * MIB, 1024 * 1024 * MIB),
+  COMMUNITY_IMPORT_UPLOAD_HOURS: between(1, 24, 168),
   COMMUNITY_ERASURE_JOURNAL: z.preprocess(
     (value) => (value === '' ? undefined : value),
     z.string().min(1).optional()
@@ -457,6 +460,12 @@ export function parseConfig(env: Record<string, unknown>) {
   ) {
     throw new Error(
       'Previous invite key ID and secret must be set together, with an ID different from the current key'
+    );
+  }
+  // An export arrives in at most 10,000 parts of at most one export segment each.
+  if (value.COMMUNITY_IMPORT_MAX_BYTES > 10_000 * value.COMMUNITY_EXPORT_SEGMENT_BYTES) {
+    throw new Error(
+      'COMMUNITY_IMPORT_MAX_BYTES must be at most 10,000 times COMMUNITY_EXPORT_SEGMENT_BYTES, the most an import can arrive in'
     );
   }
   for (const name of ['GOOGLE', 'GITHUB'] as const) {
@@ -614,6 +623,15 @@ export function parseConfig(env: Record<string, unknown>) {
       ttlHours: value.COMMUNITY_EXPORT_TTL_HOURS,
       maxHours: value.COMMUNITY_EXPORT_MAX_HOURS,
       concurrency: value.COMMUNITY_EXPORT_CONCURRENCY,
+    },
+    /**
+     * Imports: part uploads one replica receives at once, the largest export accepted in parts,
+     * and how long an import's upload token works.
+     */
+    imports: {
+      partConcurrency: value.COMMUNITY_IMPORT_PART_CONCURRENCY,
+      maxBytes: value.COMMUNITY_IMPORT_MAX_BYTES,
+      uploadHours: value.COMMUNITY_IMPORT_UPLOAD_HOURS,
     },
     /** Where each completed erasure's id-only line is also appended, outside the database. */
     erasureJournal: value.COMMUNITY_ERASURE_JOURNAL,
