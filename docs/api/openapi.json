@@ -29419,6 +29419,10 @@
                               "user",
                               "unknown"
                             ]
+                          },
+                          "recheckAt": {
+                            "type": "string",
+                            "format": "date-time"
                           }
                         },
                         "required": [
@@ -29672,6 +29676,10 @@
                         "user",
                         "unknown"
                       ]
+                    },
+                    "recheckAt": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   },
                   "required": [
@@ -29756,6 +29764,10 @@
                         "user",
                         "unknown"
                       ]
+                    },
+                    "recheckAt": {
+                      "type": "string",
+                      "format": "date-time"
                     }
                   },
                   "required": [
