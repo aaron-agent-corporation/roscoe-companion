@@ -7,6 +7,7 @@ import {
   type CommunityWireMembershipSummary,
 } from '@dorkos/shared/community-wire';
 import { describeError, hostRequest, RequestError, request } from '../api.js';
+import { ProviderButtons, type SignInProvider } from '../sign-up/ProviderButtons.js';
 import { rememberCommunity } from '../remembered-community.js';
 import {
   clearOwnerClaimFragment,
@@ -21,6 +22,7 @@ import { HostPolicyLinks } from './HostLinks.js';
 import { ConnectDorkOS } from '../connect/ConnectDorkOS.js';
 import { communityLink } from '../connect/community-link.js';
 import { takeSignInError, useSignInOptions } from '../sign-in-options.js';
+import { confirmMinimumAge, MinimumAgeConfirmation } from '../sign-up/MinimumAgeConfirmation.js';
 
 type Stage =
   'loading' | 'enter' | 'found' | 'account' | 'confirm' | 'claimed' | 'unavailable' | 'taken';
@@ -69,9 +71,12 @@ export function OwnerClaim() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
   // A provider round trip that failed returns here with `?error=`; say why once.
   const [error, setError] = useState(() => takeSignInError() ?? '');
   const providers = useSignInOptions();
+  // A new account must first confirm the host's minimum age, when it set one.
+  const minimumAge = mode === 'signup' ? providers.minimumAge : null;
   const heading = useRef<HTMLHeadingElement>(null);
   const focusedStage = useRef(stage);
   const resumeOnMount = useRef(stage === 'loading');
@@ -223,6 +228,7 @@ export function OwnerClaim() {
     setBusy(true);
     setError('');
     try {
+      if (minimumAge !== null) await confirmMinimumAge();
       await request(
         mode === 'signup' ? '/api/auth/sign-up/email' : '/api/auth/sign-in/email',
         'POST',
@@ -246,11 +252,13 @@ export function OwnerClaim() {
     setBusy(false);
   }
 
-  async function social(provider: 'google' | 'github' | 'oidc') {
+  async function social(provider: SignInProvider) {
     setBusy(true);
     setError('');
     try {
       const here = window.location.origin + OWNER_CLAIM_PATH;
+      // The provider's callback creates the account, so the confirmation must be in place first.
+      if (minimumAge !== null) await confirmMinimumAge();
       const result = await authClient.signIn.social({
         provider,
         callbackURL: here,
@@ -413,6 +421,14 @@ export function OwnerClaim() {
                   <span className="hint">At least {COMMUNITY_PASSWORD_MIN_LENGTH} characters.</span>
                 )}
               </div>
+              {minimumAge !== null && (
+                <MinimumAgeConfirmation
+                  id="owner-claim-minimum-age"
+                  minimumAge={minimumAge}
+                  confirmed={ageConfirmed}
+                  onChange={setAgeConfirmed}
+                />
+              )}
               <Button type="submit" variant="default" className="w-full" disabled={busy}>
                 {busy
                   ? 'Working…'
@@ -422,40 +438,11 @@ export function OwnerClaim() {
                 <KeyRound size={16} aria-hidden="true" />
               </Button>
             </form>
-            {(providers.google || providers.github || providers.oidc) && (
-              <div className="row mt-4">
-                {providers.google && (
-                  <Button
-                    variant="outline"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void social('google')}
-                  >
-                    Continue with Google
-                  </Button>
-                )}
-                {providers.github && (
-                  <Button
-                    variant="outline"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void social('github')}
-                  >
-                    Continue with GitHub
-                  </Button>
-                )}
-                {providers.oidc && (
-                  <Button
-                    variant="outline"
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void social('oidc')}
-                  >
-                    Continue with {providers.oidc.label}
-                  </Button>
-                )}
-              </div>
-            )}
+            <ProviderButtons
+              providers={providers}
+              disabled={busy || (minimumAge !== null && !ageConfirmed)}
+              onChoose={(provider) => void social(provider)}
+            />
           </>
         )}
         {stage === 'confirm' && (
