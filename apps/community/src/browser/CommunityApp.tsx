@@ -9,6 +9,7 @@ import { SignedOutPanel } from './components/SignOut.js';
 import { returnToChooserWithNotice } from './components/CommunityChooser.js';
 import { rememberCommunity } from './remembered-community.js';
 import { ErasureBanner } from './components/Erasure.js';
+import { TakedownBanner } from './takedowns/TakedownNotices.js';
 import {
   communityBasePath,
   describeError,
@@ -477,6 +478,11 @@ export function CommunityApp() {
           </Notice>
         )}
         <ErasureBanner communityId={community!.id} />
+        <TakedownBanner
+          key={`${community!.id}:${me.member.memberId}`}
+          communityId={community!.id}
+          memberId={me.member.memberId}
+        />
         {held && <HoldBanner deletionNoticeAt={deletionNoticeAt} />}
         {settings ? (
           <Manage

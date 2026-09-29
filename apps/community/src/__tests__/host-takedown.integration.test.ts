@@ -851,8 +851,9 @@ describe('an item takedown with an evidence store', () => {
     const notices = async (cookie: string) =>
       CommunityWireTakedownNoticeListResponseSchema.parse(
         await body(await h.call(`${s.base}/takedowns`, { cookie }), 200, 'notices')
-      ).takedowns.map((notice) => notice.id);
-    expect(await notices(s.p.cookie)).toEqual([t.id]);
+      ).takedowns.map((notice) => ({ id: notice.id, yours: notice.yours }));
+    // The agent's owner is its author for the notice: the banner's `yours` is true for them.
+    expect(await notices(s.p.cookie)).toEqual([{ id: t.id, yours: true }]);
     expect(await notices(s.q.cookie)).toEqual([]);
   });
 
@@ -1278,8 +1279,9 @@ describe('an item takedown with an evidence store', () => {
       reference: 'REF-11',
       createdAt: told.createdAt,
     };
-    expect(await notices(c.s.owner.cookie)).toEqual([expected]);
-    expect(await notices(c.s.p.cookie)).toEqual([expected]);
+    // The owner is told as the owner, the author as the author: only the author's is `yours`.
+    expect(await notices(c.s.owner.cookie)).toEqual([{ ...expected, yours: false }]);
+    expect(await notices(c.s.p.cookie)).toEqual([{ ...expected, yours: true }]);
     expect(await notices(c.s.q.cookie)).toEqual([]);
     // Withheld: nobody is told, but the tombstone still shows.
     expect(
