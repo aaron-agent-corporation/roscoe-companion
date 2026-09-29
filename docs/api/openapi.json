@@ -29172,6 +29172,7 @@
                                   "own_key_cannot_run_actions",
                                   "cannot_run_actions",
                                   "paused",
+                                  "signing_in",
                                   "signed_out",
                                   "sign_in_unfinished",
                                   "needs_review",
@@ -29179,8 +29180,8 @@
                                   "access_updating",
                                   "disconnected",
                                   "disconnect_finishing",
-                                  "disconnect_failed",
-                                  "disconnect_stuck"
+                                  "disconnect_stuck",
+                                  "gone_at_service"
                                 ]
                               },
                               "fix": {
@@ -29196,6 +29197,7 @@
                                       "review_access",
                                       "fix_key",
                                       "retry",
+                                      "remove",
                                       "wait",
                                       "turn_on_for_this_chat"
                                     ]
@@ -29215,6 +29217,25 @@
                                 "required": [
                                   "action",
                                   "fixableBy"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "serviceAccessPage": {
+                                "type": "object",
+                                "properties": {
+                                  "service": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "service",
+                                  "url"
                                 ],
                                 "additionalProperties": false
                               },
@@ -30300,6 +30321,7 @@
                                 "own_key_cannot_run_actions",
                                 "cannot_run_actions",
                                 "paused",
+                                "signing_in",
                                 "signed_out",
                                 "sign_in_unfinished",
                                 "needs_review",
@@ -30307,8 +30329,8 @@
                                 "access_updating",
                                 "disconnected",
                                 "disconnect_finishing",
-                                "disconnect_failed",
-                                "disconnect_stuck"
+                                "disconnect_stuck",
+                                "gone_at_service"
                               ]
                             },
                             "fix": {
@@ -30324,6 +30346,7 @@
                                     "review_access",
                                     "fix_key",
                                     "retry",
+                                    "remove",
                                     "wait",
                                     "turn_on_for_this_chat"
                                   ]
@@ -30343,6 +30366,25 @@
                               "required": [
                                 "action",
                                 "fixableBy"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "serviceAccessPage": {
+                              "type": "object",
+                              "properties": {
+                                "service": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 100
+                                },
+                                "url": {
+                                  "type": "string",
+                                  "format": "uri"
+                                }
+                              },
+                              "required": [
+                                "service",
+                                "url"
                               ],
                               "additionalProperties": false
                             },
@@ -31033,26 +31075,6 @@
                         "complete",
                         "failed"
                       ]
-                    },
-                    "warning": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 100
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 1000
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -31197,26 +31219,6 @@
                         "complete",
                         "failed"
                       ]
-                    },
-                    "warning": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 100
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 1000
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -32028,26 +32030,6 @@
                         "complete",
                         "failed"
                       ]
-                    },
-                    "warning": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 100
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 1000
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -32193,26 +32175,6 @@
                         "complete",
                         "failed"
                       ]
-                    },
-                    "warning": {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 100
-                        },
-                        "message": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 1000
-                        }
-                      },
-                      "required": [
-                        "code",
-                        "message"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -32415,6 +32377,7 @@
                                   "own_key_cannot_run_actions",
                                   "cannot_run_actions",
                                   "paused",
+                                  "signing_in",
                                   "signed_out",
                                   "sign_in_unfinished",
                                   "needs_review",
@@ -32422,8 +32385,8 @@
                                   "access_updating",
                                   "disconnected",
                                   "disconnect_finishing",
-                                  "disconnect_failed",
-                                  "disconnect_stuck"
+                                  "disconnect_stuck",
+                                  "gone_at_service"
                                 ]
                               },
                               "fix": {
@@ -32439,6 +32402,7 @@
                                       "review_access",
                                       "fix_key",
                                       "retry",
+                                      "remove",
                                       "wait",
                                       "turn_on_for_this_chat"
                                     ]
@@ -32458,6 +32422,25 @@
                                 "required": [
                                   "action",
                                   "fixableBy"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "serviceAccessPage": {
+                                "type": "object",
+                                "properties": {
+                                  "service": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "service",
+                                  "url"
                                 ],
                                 "additionalProperties": false
                               },
@@ -32723,6 +32706,7 @@
                                   "own_key_cannot_run_actions",
                                   "cannot_run_actions",
                                   "paused",
+                                  "signing_in",
                                   "signed_out",
                                   "sign_in_unfinished",
                                   "needs_review",
@@ -32730,8 +32714,8 @@
                                   "access_updating",
                                   "disconnected",
                                   "disconnect_finishing",
-                                  "disconnect_failed",
-                                  "disconnect_stuck"
+                                  "disconnect_stuck",
+                                  "gone_at_service"
                                 ]
                               },
                               "fix": {
@@ -32747,6 +32731,7 @@
                                       "review_access",
                                       "fix_key",
                                       "retry",
+                                      "remove",
                                       "wait",
                                       "turn_on_for_this_chat"
                                     ]
@@ -32766,6 +32751,25 @@
                                 "required": [
                                   "action",
                                   "fixableBy"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "serviceAccessPage": {
+                                "type": "object",
+                                "properties": {
+                                  "service": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "service",
+                                  "url"
                                 ],
                                 "additionalProperties": false
                               },
@@ -32965,6 +32969,7 @@
                                   "own_key_cannot_run_actions",
                                   "cannot_run_actions",
                                   "paused",
+                                  "signing_in",
                                   "signed_out",
                                   "sign_in_unfinished",
                                   "needs_review",
@@ -32972,8 +32977,8 @@
                                   "access_updating",
                                   "disconnected",
                                   "disconnect_finishing",
-                                  "disconnect_failed",
-                                  "disconnect_stuck"
+                                  "disconnect_stuck",
+                                  "gone_at_service"
                                 ]
                               },
                               "fix": {
@@ -32989,6 +32994,7 @@
                                       "review_access",
                                       "fix_key",
                                       "retry",
+                                      "remove",
                                       "wait",
                                       "turn_on_for_this_chat"
                                     ]
@@ -33008,6 +33014,25 @@
                                 "required": [
                                   "action",
                                   "fixableBy"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "serviceAccessPage": {
+                                "type": "object",
+                                "properties": {
+                                  "service": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "url": {
+                                    "type": "string",
+                                    "format": "uri"
+                                  }
+                                },
+                                "required": [
+                                  "service",
+                                  "url"
                                 ],
                                 "additionalProperties": false
                               },
@@ -58281,6 +58306,7 @@
                               "own_key_cannot_run_actions",
                               "cannot_run_actions",
                               "paused",
+                              "signing_in",
                               "signed_out",
                               "sign_in_unfinished",
                               "needs_review",
@@ -58288,8 +58314,8 @@
                               "access_updating",
                               "disconnected",
                               "disconnect_finishing",
-                              "disconnect_failed",
-                              "disconnect_stuck"
+                              "disconnect_stuck",
+                              "gone_at_service"
                             ]
                           },
                           "note": {
