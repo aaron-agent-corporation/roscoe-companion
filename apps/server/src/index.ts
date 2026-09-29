@@ -434,6 +434,10 @@ import {
 import { CommunityOutboxRuntime } from './services/communities/remote/community-outbox-runtime.js';
 import { RemoteRoomSubscriptionBridge } from './services/communities/remote/remote-room-subscription-bridge.js';
 import { RemoteRoomSubscriptionRuntime } from './services/communities/remote/remote-room-subscription-runtime.js';
+import {
+  orphanedMirrorSweepDeps,
+  sweepOrphanedMirrors,
+} from './services/communities/remote/orphaned-mirror-sweep.js';
 import { RemoteRedactionSync } from './services/communities/remote/remote-redaction-sync.js';
 import { registerRemoteCommunityUnregisterCascade } from './services/communities/remote/mesh-unregister-cascade.js';
 import { isCurrentLocalMeshAgent } from './services/communities/remote/local-agent-authority.js';
@@ -2482,6 +2486,17 @@ async function start() {
     if (meshStartupReconciled) {
       remoteCommunityRuntime?.start();
       remoteCommunitySubscriptions?.start();
+      // Copies left behind by a connection that no longer exists (DOR-2334).
+      const subscriptions = remoteCommunitySubscriptions;
+      if (remoteCommunityRuntime && subscriptions)
+        void sweepOrphanedMirrors(
+          orphanedMirrorSweepDeps(
+            getRemoteConnectionStore(),
+            remoteCommunityRuntime.mirrors,
+            (communityRef, ownerAuthorId) =>
+              subscriptions.revokeConnection(communityRef, ownerAuthorId)
+          )
+        );
     }
 
     // Settle marketplace installs a crash interrupted inside registered
