@@ -122,8 +122,18 @@ export async function explainCommunityLiveGateFailure(
 ): Promise<unknown> {
   // A held-phase failure is reported after its cleanup and already says so, naming its own step.
   if (state.cleanedUp && error instanceof CommunityLiveHeldPhaseError) return error;
-  if (state.cleanedUp)
+  // A check the gate makes after cleanup (DOR-2593: the launcher contacted a DorkOS host) keeps its
+  // own fixed step and detail, so the reason is not lost behind the generic after-cleanup one.
+  if (state.cleanedUp) {
+    if (error instanceof CommunityLiveGateError) {
+      return new CommunityLiveGateError(
+        error.step,
+        null,
+        error.detail ? `${CLEANED_UP_DETAIL}: ${error.detail}` : CLEANED_UP_DETAIL
+      );
+    }
     return new CommunityLiveGateError(AFTER_CLEANUP_STEP, null, CLEANED_UP_DETAIL);
+  }
   // A launcher that failed before the gate read its journal may still have written one, and may
   // already have created resources. Find it now rather than stay silent about them.
   const recoveryCommand = state.recoveryCommand ?? (await findRecoveryCommand().catch(() => null));
@@ -151,6 +161,36 @@ export async function explainCommunityLiveGateFailure(
     error instanceof CommunityLiveGateError ? error.step : 'execution',
     recoveryCommand,
     launcherStop ?? undefined
+  );
+}
+
+/** Step a run fails at when its launcher tried to reach a DorkOS host (DOR-2593). */
+export const DORKOS_HOSTS_CONTACTED_STEP = 'dorkos-hosts-contacted';
+
+/**
+ * Name the DorkOS hosts a failed run's launcher tried to reach. A launcher the guard refused
+ * usually fails at an earlier step (its journal, its exit), so without this the operator would see
+ * that step and pay for another run to learn the cause.
+ *
+ * @param explained - The failure `explainCommunityLiveGateFailure` decided on.
+ * @param contacted - Hosts from the guard's record; empty when none (or no record).
+ * @returns `explained` unchanged when nothing was contacted or it already names the hosts; else a
+ *   gate error keeping its step and recovery command, with the hosts added to its detail.
+ */
+export function withDorkosHostsContacted(
+  explained: unknown,
+  contacted: readonly string[]
+): unknown {
+  if (contacted.length === 0) return explained;
+  if (explained instanceof CommunityLiveGateError && explained.step === DORKOS_HOSTS_CONTACTED_STEP)
+    return explained;
+  const reached = `the launcher tried to reach ${contacted.join(', ')}`;
+  if (!(explained instanceof CommunityLiveGateError))
+    return new CommunityLiveGateError(DORKOS_HOSTS_CONTACTED_STEP, null, reached);
+  return new CommunityLiveGateError(
+    explained.step,
+    explained.recoveryCommand,
+    explained.detail ? `${explained.detail}; ${reached}` : reached
   );
 }
 

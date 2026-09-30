@@ -45,6 +45,9 @@ function community(faults: Faults = {}) {
     const owner = cookie.includes('owner-session');
     const member = cookie.includes('member-session');
     calls.push(`${method} ${path.replace(`/api/v1/communities/${communityId}`, '')}`);
+    // The owner proof first reads the sign-in options, which must offer no single sign-on.
+    if (path === '/api/v1/auth-options')
+      return Response.json({ google: false, github: false, oidc: null, minimumAge: null });
     if (path.endsWith('/bootstrap/preflight'))
       return Response.json({}, { headers: { 'set-cookie': 'community_bootstrap=b; HttpOnly' } });
     if (path.endsWith('/bootstrap/complete'))
@@ -142,7 +145,8 @@ describe('second-member Community HTTP proof', () => {
       secondMemberReplyEntryId: replyId,
       secondMemberProof: true,
     });
-    expect(calls.slice(7)).toEqual([
+    // The owner proof makes eight calls: the sign-in options read, setup and the file proof.
+    expect(calls.slice(8)).toEqual([
       'POST /invites',
       'POST /invites/preflight',
       'POST /api/auth/sign-up/email',

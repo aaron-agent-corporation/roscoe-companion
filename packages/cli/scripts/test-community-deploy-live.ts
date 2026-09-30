@@ -38,8 +38,10 @@ import {
   describeCommunityLiveGateFailure,
   describeLauncherExit,
   describeLauncherStop,
+  DORKOS_HOSTS_CONTACTED_STEP,
   explainCommunityLiveGateFailure,
   PUBLISHED_LAUNCHER_STEP,
+  withDorkosHostsContacted,
 } from './community-deploy-live-failure.js';
 import {
   parsePublishedVersion,
@@ -72,6 +74,10 @@ import {
   readFlySessionCredential,
 } from '../src/commands/community-deploy/tigris-session.js';
 import { runProviderCommand } from '../src/commands/community-deploy/provider-process.js';
+import {
+  readDorkosHostsContacted,
+  withNoDorkosHostsGuard,
+} from './community-deploy-no-dorkos-hosts-record.js';
 
 // Derived from the launcher's own deadlines; see COMMUNITY_LIVE_LAUNCHER_TIMEOUT_MS.
 const TIMEOUT_MS = COMMUNITY_LIVE_LAUNCHER_TIMEOUT_MS;
@@ -84,6 +90,11 @@ const TIMEOUT_MS = COMMUNITY_LIVE_LAUNCHER_TIMEOUT_MS;
 const DELIVERED_CAPTURE_MS = 30_000;
 /** Deadline for the no-op `fly ssh console` probe; the first one may issue an SSH certificate. */
 const SSH_PROBE_TIMEOUT_MS = 120_000;
+/**
+ * The parents of the launcher processes each run starts under the DorkOS-host guard: `--help`,
+ * the launch and the resume, each spawned directly by the gate (node-pty's helper execs in place).
+ */
+const GUARDED_LAUNCHER_PARENTS = [process.pid, process.pid, process.pid];
 
 /** A launcher running in a PTY: its exit, and a way to stop it from the gate's finally. */
 interface LauncherRun {
@@ -176,6 +187,9 @@ async function main(): Promise<void> {
   const appName = `dorkos-gate-${randomBytes(6).toString('hex')}`;
   const durableHome = join(liveGateHome, appName);
   const socketPath = join(runDirectory, 'bootstrap.sock');
+  // Every DorkOS host the installed launcher tried to reach, recorded by the guard preload
+  // (DOR-2593). Read after cleanup, before the run directory is removed.
+  const dorkosHostsRecordPath = join(runDirectory, 'dorkos-hosts.jsonl');
   const receiptDirectory = join(durableHome, '..', 'receipts');
   const receiptPath = join(receiptDirectory, `${appName}.json`);
   let bootstrap: string | null = null;
@@ -270,10 +284,20 @@ async function main(): Promise<void> {
       'package-install'
     );
     const binary = join(install, 'node_modules/.bin/dorkos');
+    // Guarded like every launcher run (its record is read after cleanup, with the rest). The
+    // guard is appended to whatever NODE_OPTIONS the operator already runs with.
     const help = await command(
       binary,
       ['community', 'deploy', '--help'],
-      process.env,
+      withNoDorkosHostsGuard(
+        Object.fromEntries(
+          // eslint-disable-next-line no-restricted-syntax -- The gate runs --help with the operator's environment, as before.
+          Object.entries(process.env).flatMap(([name, value]) =>
+            value === undefined ? [] : [[name, value]]
+          )
+        ),
+        dorkosHostsRecordPath
+      ),
       PUBLISHED_LAUNCHER_STEP
     );
     if (!help.includes('Guided setup') && !help.includes('Guide a standalone'))
@@ -301,6 +325,8 @@ async function main(): Promise<void> {
         )
       ),
     };
+    // The launcher runs guarded; the gate's own provider reads below use the plain environment.
+    const launcherEnvironment = withNoDorkosHostsGuard(environment, dorkosHostsRecordPath);
     const fly = { executable: 'fly', env: environment, timeoutMs: 30_000 };
     const neon = { executable: 'neonctl', env: environment, timeoutMs: 30_000 };
     // The launcher asks for Tigris terms only after it has created the Fly app and the Neon
@@ -327,7 +353,7 @@ async function main(): Promise<void> {
     launcher = runLauncherPty({
       binary,
       args: launchArgs,
-      environment,
+      environment: launcherEnvironment,
       appName,
       ownerClaimed: new Promise<void>(() => undefined),
       interruptAtOwnerPending: true,
@@ -352,7 +378,7 @@ async function main(): Promise<void> {
     launcher = runLauncherPty({
       binary,
       args: [...launchArgs, '--resume', runId],
-      environment,
+      environment: launcherEnvironment,
       appName,
       ownerClaimed,
     });
@@ -517,6 +543,23 @@ async function main(): Promise<void> {
       ),
       tigrisBucketFound,
     };
+    // DOR-2593: a self-hosted launch never needs DorkOS. Checked after cleanup, so a run that
+    // fails here strands nothing, and recorded in the receipt so every paid run carries it.
+    // Three guarded launcher processes: `--help`, the interrupted launch and the resume.
+    const dorkosHostsContacted = await readDorkosHostsContacted(
+      dorkosHostsRecordPath,
+      GUARDED_LAUNCHER_PARENTS
+    ).catch((error: unknown) => {
+      // Its message is fixed and non-secret; wrapped so the reason survives the after-cleanup path.
+      throw new CommunityLiveGateError('dorkos-hosts-guard', null, (error as Error).message);
+    });
+    if (dorkosHostsContacted.length > 0) {
+      throw new CommunityLiveGateError(
+        DORKOS_HOSTS_CONTACTED_STEP,
+        null,
+        `the launcher tried to reach ${dorkosHostsContacted.join(', ')}`
+      );
+    }
     // This receipt is intentionally non-secret and remains only long enough for the gate's caller.
     await mkdir(receiptDirectory, { recursive: true, mode: 0o700 });
     await writeFile(
@@ -532,6 +575,7 @@ async function main(): Promise<void> {
         initialBootstrapSecretDigest: initialBootstrapDigest,
         bootstrapSecretDigest: bootstrapDigest,
         provenance,
+        dorkosHostsContacted,
         ...ownerProof.receipt,
         ...held.phase.member,
         ...(held.phase.hold ? { held: held.phase.hold } : {}),
@@ -543,7 +587,7 @@ async function main(): Promise<void> {
     );
     await rm(durableHome, { recursive: true, force: true });
   } catch (error) {
-    throw await explainCommunityLiveGateFailure(
+    const explained = await explainCommunityLiveGateFailure(
       error,
       { cleanedUp, recoveryCommand },
       async () => {
@@ -556,6 +600,12 @@ async function main(): Promise<void> {
         const journal = await readFile(join(journalDirectory, `${runId}.json`), 'utf8');
         return describeLauncherStop(JSON.parse(journal) as unknown);
       }
+    );
+    // A launcher the guard refused usually fails at an earlier step (its journal, its exit), so the
+    // record is read on every failure too, before the finally removes it. Best-effort.
+    throw withDorkosHostsContacted(
+      explained,
+      await readDorkosHostsContacted(dorkosHostsRecordPath, null).catch((): string[] => [])
     );
   } finally {
     if (bootstrap) Buffer.from(bootstrap).fill(0);
