@@ -26,6 +26,8 @@ import { configureServerTimeouts } from './http.js';
 import { createEvidenceSink, tidyEvidenceSink } from './takedown/evidence/sink.js';
 import { sweepTakedownEvidence } from './takedown/worker.js';
 import { startMailDelivery, type NoticeComposers } from './mail/worker.js';
+import { ownerReplacementComposers } from './owner-replacement/notices.js';
+import { startOwnerReplacementTimeline } from './owner-replacement/worker.js';
 import { pruneNoticeOutbox } from './mail/outbox.js';
 
 const config = parseConfig(process.env);
@@ -47,8 +49,20 @@ const evidenceSink = createEvidenceSink(config.evidence);
 await tidyEvidenceSink(evidenceSink);
 // The mail worker's composers, by notice kind. The same set goes to the app, which refuses to
 // start anything whose notice the worker could not compose.
-const noticeComposers: NoticeComposers = {};
-const app = createCommunityApp({ config, pool, blobStore, noticeComposers });
+const noticeComposers: NoticeComposers = { ...ownerReplacementComposers(config) };
+// Whether a host may start an owner replacement. It stays off until the owner can answer the
+// notice end to end: the notice's "Keep ownership" link must open a page that works. Task 2.4
+// (the object-only link and signed-in objection routes, and the claim) and task 3.1 (the
+// /keep-ownership page) turn it on. Until then the worker still sends the notices of any
+// request already open, and every new request is refused.
+const ownerReplacementOpen = false;
+const app = createCommunityApp({
+  config,
+  pool,
+  blobStore,
+  noticeComposers,
+  ownerReplacementOpen,
+});
 const staticRoot = fileURLToPath(new URL('../dist/', import.meta.url));
 app.use('/assets/*', serveStatic({ root: staticRoot }));
 app.get('/', serveStatic({ path: fileURLToPath(new URL('../dist/index.html', import.meta.url)) }));
@@ -251,13 +265,23 @@ const takedownEvidence = setInterval(() => {
 }, 15_000);
 takedownEvidence.unref();
 // Off unless the host configured SMTP. Each feature that queues mail adds its composers to
-// `noticeComposers` above; until owner replacements add theirs, the host refuses to start one.
+// `noticeComposers` above.
 const mail = startMailDelivery({ config, pool, composers: noticeComposers });
+// Moves owner replacements through their notice, wait, reminder, claim window, and expiry.
+const ownerReplacements = startOwnerReplacementTimeline({ pool, config });
 const onSignal = createSignalHandler(
   createStop({
     server,
     pool,
-    timers: [cleanup, erasures, exports, imports, takedownEvidence, ...(mail ? [mail] : [])],
+    timers: [
+      cleanup,
+      erasures,
+      exports,
+      imports,
+      takedownEvidence,
+      ownerReplacements,
+      ...(mail ? [mail] : []),
+    ],
   })
 );
 process.on('SIGINT', onSignal);
