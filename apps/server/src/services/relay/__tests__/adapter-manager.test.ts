@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb } from '@dorkos/test-utils/db';
 import { AdapterManager, AdapterError, normalizeAgentRuntimes } from '../adapter-manager.js';
-import { AdapterRegistry, ClaudeCodeAdapter } from '@dorkos/relay';
+import { AdapterRegistry, ClaudeCodeAdapter, TRACE_PRUNE_BATCH } from '@dorkos/relay';
 import type { AdapterStatus, RelayAdapter, RelayPublisher } from '@dorkos/relay';
 import { taskDispatchSubject } from '@dorkos/shared/relay-schemas';
 import type { AdapterManagerDeps, AdapterMeshCoreLike } from '../adapter-manager.js';
 import { BridgeStore } from '../chat-bridge/bridge-store.js';
 import { RoomStore } from '../../rooms/room-store.js';
+import { TraceStore } from '../trace-store.js';
 
 // Mock fs/promises
 vi.mock('node:fs/promises', () => ({
@@ -15,6 +16,8 @@ vi.mock('node:fs/promises', () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   rename: vi.fn().mockResolvedValue(undefined),
   chmod: vi.fn().mockResolvedValue(undefined),
+  // A failed atomic write removes its temp file.
+  rm: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock chokidar
@@ -1605,6 +1608,139 @@ describe('AdapterManager', () => {
       expect(mockBindingStore.delete).toHaveBeenCalledWith('b2');
       // Should NOT delete the binding for wh-github
       expect(mockBindingStore.delete).not.toHaveBeenCalledWith('b3');
+    });
+
+    describe('delivery history (DOR-2604)', () => {
+      /** A real trace store holding one chat on `tg-main` and one on `tg-main-2`. */
+      function seededTraceStore(): TraceStore {
+        const traces = new TraceStore(createTestDb());
+        for (const adapterId of ['tg-main', 'tg-main-2']) {
+          traces.insertSpan({
+            messageId: `in-${adapterId}`,
+            traceId: `in-${adapterId}`,
+            subject: `relay.human.telegram.${adapterId}.111`,
+            status: 'delivered',
+            metadata: { from: `relay.human.telegram.${adapterId}.bot`, chatName: 'Ada' },
+          });
+          traces.insertAdapterEvent(adapterId, 'adapter.connected', 'Connected to relay');
+        }
+        return traces;
+      }
+
+      it('keeps the history when the removal is internal, not a person removing it', async () => {
+        // A package update and an install rollback both call removeAdapter
+        // without the flag; neither may erase a history nobody asked to lose.
+        vi.mocked(readFile).mockResolvedValue(VALID_CONFIG);
+        const traces = seededTraceStore();
+        const withTraces = new AdapterManager(registry, configPath, {
+          ...mockDeps,
+          traceEraser: traces,
+        });
+        await initAndStart(withTraces);
+
+        await withTraces.removeAdapter('tg-main');
+
+        expect(withTraces.listAdapters().find((a) => a.config.id === 'tg-main')).toBeUndefined();
+        expect(traces.getObservedChats('tg-main')).toEqual([
+          expect.objectContaining({ chatId: '111', displayName: 'Ada' }),
+        ]);
+        expect(traces.getAdapterEvents('tg-main')).toHaveLength(1);
+      });
+
+      it("deletes the removed connection's chats, names and events, and no one else's", async () => {
+        vi.mocked(readFile).mockResolvedValue(VALID_CONFIG);
+        const traces = seededTraceStore();
+        const withTraces = new AdapterManager(registry, configPath, {
+          ...mockDeps,
+          traceEraser: traces,
+        });
+        await initAndStart(withTraces);
+
+        await withTraces.removeAdapter('tg-main', { forgetHistory: true });
+
+        expect(traces.getObservedChats('tg-main')).toEqual([]);
+        expect(traces.getAdapterEvents('tg-main')).toEqual([]);
+        expect(traces.getSpanByMessageId('in-tg-main')).toBeNull();
+        // `tg-main-2` starts with `tg-main` and is a different connection.
+        expect(traces.getObservedChats('tg-main-2')).toEqual([
+          expect.objectContaining({ chatId: '111', displayName: 'Ada' }),
+        ]);
+        expect(traces.getAdapterEvents('tg-main-2')).toHaveLength(1);
+      });
+
+      it('keeps the history when the removal could not be saved', async () => {
+        vi.mocked(readFile).mockResolvedValue(VALID_CONFIG);
+        const traces = seededTraceStore();
+        const withTraces = new AdapterManager(registry, configPath, {
+          ...mockDeps,
+          traceEraser: traces,
+        });
+        await initAndStart(withTraces);
+        vi.mocked(writeFile).mockRejectedValueOnce(new Error('disk full'));
+
+        await expect(withTraces.removeAdapter('tg-main', { forgetHistory: true })).rejects.toThrow(
+          'disk full'
+        );
+
+        expect(traces.getObservedChats('tg-main')).toHaveLength(1);
+        expect(traces.getAdapterEvents('tg-main')).toHaveLength(1);
+      });
+
+      it('deletes the history of an entry whose saved settings could not be read', async () => {
+        vi.mocked(readFile).mockResolvedValue(
+          JSON.stringify({
+            adapters: [{ id: 'tg-main', type: 'telegram', enabled: 'yes please', config: null }],
+          })
+        );
+        const traces = seededTraceStore();
+        const withTraces = new AdapterManager(registry, configPath, {
+          ...mockDeps,
+          traceEraser: traces,
+        });
+        await initAndStart(withTraces);
+
+        await withTraces.removeAdapter('tg-main', { forgetHistory: true });
+
+        expect(traces.getObservedChats('tg-main')).toEqual([]);
+        expect(traces.getAdapterEvents('tg-main')).toEqual([]);
+        expect(traces.getObservedChats('tg-main-2')).toHaveLength(1);
+      });
+
+      it('deletes a long history in batches until none is left', async () => {
+        vi.mocked(readFile).mockResolvedValue(VALID_CONFIG);
+        // Two full batches, then a short one: the loop must keep going past a full batch.
+        const sizes = [TRACE_PRUNE_BATCH, TRACE_PRUNE_BATCH, 7];
+        const traceEraser = { deleteConnectionTraces: vi.fn(() => sizes.shift() ?? 0) };
+        const withEraser = new AdapterManager(registry, configPath, { ...mockDeps, traceEraser });
+        await initAndStart(withEraser);
+
+        await withEraser.removeAdapter('tg-main', { forgetHistory: true });
+
+        expect(traceEraser.deleteConnectionTraces).toHaveBeenCalledTimes(3);
+        expect(traceEraser.deleteConnectionTraces).toHaveBeenCalledWith(
+          'tg-main',
+          TRACE_PRUNE_BATCH
+        );
+      });
+
+      it('still removes the connection when its history cannot be deleted', async () => {
+        vi.mocked(readFile).mockResolvedValue(VALID_CONFIG);
+        const traceEraser = {
+          deleteConnectionTraces: vi.fn(() => {
+            throw new Error('database is locked');
+          }),
+        };
+        const withEraser = new AdapterManager(registry, configPath, { ...mockDeps, traceEraser });
+        await initAndStart(withEraser);
+
+        await withEraser.removeAdapter('tg-main', { forgetHistory: true });
+
+        expect(traceEraser.deleteConnectionTraces).toHaveBeenCalledWith(
+          'tg-main',
+          TRACE_PRUNE_BATCH
+        );
+        expect(withEraser.listAdapters().find((a) => a.config.id === 'tg-main')).toBeUndefined();
+      });
     });
 
     it('does not affect bindings for other adapters on removal', async () => {
