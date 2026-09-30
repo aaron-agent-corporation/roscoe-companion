@@ -1229,6 +1229,19 @@ describe('erasures wait for a community takedown’s evidence', () => {
         )
       ).rowCount
     ).toBe(0);
+    // DOR-2566: the erasure journal names who was erased only once each erasure finishes.
+    const journaled = async () =>
+      (
+        await h.pool.query<{ kind: string }>(
+          `SELECT kind FROM erasure_journal
+           WHERE (kind='member' AND community_id=$1 AND member_id=$2)
+              OR (kind='member' AND community_id=$1 AND member_id=$3)
+              OR (kind='account' AND user_id=$4)
+           ORDER BY kind`,
+          [s.communityId, s.p.memberId, s.q.memberId, s.q.userId]
+        )
+      ).rows.map((row) => row.kind);
+    expect(await journaled()).toEqual([]);
     await drainExportsOf(h, s.communityId);
     expect(await copyEvidence(h, takedown.id)).toEqual({ claimed: true, stored: true });
     expect((await waiting())?.waitingOnHost).toBe(false);
@@ -1252,6 +1265,18 @@ describe('erasures wait for a community takedown’s evidence', () => {
       [ids]
     );
     expect(started.rows.map((row) => row.id).sort()).toEqual([...ids].sort());
+    // Once they finish, each erasure the takedown held is journaled like any other: P's
+    // membership, and Q's account with Q's membership in it.
+    for (let pass = 0; pass < 10; pass++) await sweepErasures(h.pool, { now: later });
+    expect(
+      (
+        await h.pool.query<{ state: string }>(
+          'SELECT state FROM erasure_requests WHERE id=ANY($1::uuid[])',
+          [ids]
+        )
+      ).rows.map((row) => row.state)
+    ).toEqual(['completed', 'completed']);
+    expect(await journaled()).toEqual(['account', 'member', 'member']);
   });
 });
 
