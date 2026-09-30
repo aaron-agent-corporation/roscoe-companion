@@ -155,11 +155,19 @@ export class RemoteCommunityNameNotFoundError extends Error {
   }
 }
 
-/** The host refused a short-name lookup because this server asked too often. */
-export class RemoteCommunityLookupRateLimitedError extends Error {
-  constructor() {
-    super('The community host is limiting short-name lookups');
-    this.name = 'RemoteCommunityLookupRateLimitedError';
+/**
+ * The host refused a short-name lookup or a pairing start because this server asked too often.
+ * Both are limited per caller, so the address itself may be fine.
+ */
+export class RemoteCommunityRateLimitedError extends Error {
+  /**
+   * Record the host's refusal, with its own wait when it named one.
+   *
+   * @param retryAfterSeconds - How long the host asked this server to wait, when it said.
+   */
+  constructor(readonly retryAfterSeconds?: number) {
+    super('The community host is limiting requests from this server');
+    this.name = 'RemoteCommunityRateLimitedError';
   }
 }
 
@@ -584,7 +592,13 @@ export class RemoteCommunityPairingService {
         }
       );
     } catch (error) {
-      if (!target.communityId && error instanceof PinnedHttpError && error.status === 404)
+      if (!(error instanceof PinnedHttpError)) throw error;
+      // The host limits pairing starts per caller, as it does name lookups: the address is fine.
+      if (error.status === 429) throw new RemoteCommunityRateLimitedError(error.retryAfterSeconds);
+      // A server built before tenant-qualified routes has no such route, so its 404 carries no
+      // code. A coded 404 (NOT_FOUND) is today's server saying the community is gone, which an
+      // upgrade would not fix.
+      if (!target.communityId && error.status === 404 && error.remoteCode === undefined)
         throw new RemoteCommunityUpgradeRequiredError();
       throw error;
     }
@@ -634,7 +648,7 @@ export class RemoteCommunityPairingService {
       if (error instanceof PinnedHttpError && error.status === 404)
         throw new RemoteCommunityNameNotFoundError();
       if (error instanceof PinnedHttpError && error.status === 429)
-        throw new RemoteCommunityLookupRateLimitedError();
+        throw new RemoteCommunityRateLimitedError(error.retryAfterSeconds);
       throw error;
     }
     const parsed = CommunityWireShortNameLookupSchema.safeParse(answer);
