@@ -124,7 +124,7 @@ Then watch for failed notices. The server logs each attempt that does not delive
 
 ## Host API keys
 
-A program that creates or manages communities on this host, such as a provisioning script, should use its own host API key rather than a person's password. Create one on the host page under **API keys**, or with the offline command. Give each program only the permissions it needs: `communities:read` to list communities, `communities:write` to create unclaimed communities and send owner claims, `communities:lifecycle` to suspend and resume, `communities:takedown` to take down content by its ID, and `communities:erasure_journal` to copy the [erasure journal](#erasure-requests) off the server. No key can read what happens inside a community, and no key can create, replace, or revoke keys. A key with `communities:write` can create a community and hand out the link that makes someone its owner, so give that permission only to programs you trust to decide who owns a community.
+A program that creates or manages communities on this host, such as a provisioning script, should use its own host API key rather than a person's password. Create one on the host page under **API keys**, or with the offline command. Give each program only the permissions it needs: `communities:read` to list communities, `communities:write` to create unclaimed communities and send owner claims, `communities:lifecycle` to suspend and resume, `communities:takedown` to take down content by its ID, `communities:erasure_journal` to copy the [erasure journal](#erasure-requests) off the server, and `communities:ownership` to ask to replace an owner who has left (see [below](#replacing-an-owner-who-has-left)). No other permission includes `communities:ownership`, so a key that suspends communities cannot replace owners. No key can read what happens inside a community, and no key can create, replace, or revoke keys. A key with `communities:write` can create a community and hand out the link that makes someone its owner, so give that permission only to programs you trust to decide who owns a community.
 
 To create the first key on a host without a browser, run the offline command with `COMMUNITY_DATABASE_URL` set. It prints the key once on standard output, so pipe it straight into your secret store:
 
@@ -158,6 +158,20 @@ When you must stop a community without destroying it, for example while you look
 If you intend to delete a held community, publish a deletion notice: a date at least `COMMUNITY_HOST_DELETION_NOTICE_DAYS` away (14 days unless you change it; never fewer than 7). Members see the date on every channel, with a reminder that the owner can export until then. After the date passes, **Delete** asks for the last eight characters of the community's ID and schedules the same seven-day deletion an owner's request does; you can cancel it during those seven days, and the owner cannot. A suspended community cannot be deleted this way, because its owner could not export: hold it with a notice date first.
 
 A suspended community can be put on hold directly. It goes from suspended to on hold in one step and is never live in between.
+
+## Replacing an owner who has left
+
+Sometimes the person who owns a community leaves, and nobody can manage it any more. If they can still sign in, ask them to hand it over themselves from the community's Settings.
+
+This server has the host's side of replacing an owner (`POST /api/v1/host/communities/:id/owner-replacements`, see [the API](API.md#replace-an-owner-who-has-left)), but not yet the owner's side: the email that tells them, and their way to say no. Until that is ready, every request is refused with `409 NOTICE_DELIVERY_UNAVAILABLE`, even with mail set up. Nothing changes for any community.
+
+What you can prepare now:
+
+- **Mail.** Requests will need it, because the owner must be told outside the community they may have left (see [Mail](#mail)).
+- **Who can ask.** A host API key with `communities:ownership`, or a host operator with their password. An operator who signs in only through single sign-on has no password to confirm, so they use a key with that permission instead.
+- **Naming the new owner.** When this host uses single sign-on, every request must name the new owner by the ID your sign-in service gives that person for this site, and only that account will be able to take ownership. Some sign-in services give each site a different ID for the same person. Use the one your service gives this host, not one another app sees: find it in your own records (for example, a sign-in by that person on this host) or in your sign-in service's admin tools.
+
+**What will protect the owner.** The design's protection against someone who has stolen a key or tricked an operator is the notice to the owner, the waiting period, and the owner's objection, on every host. The claim link is not a protection: whoever can ask can send a new link. Naming the new owner is not either, because a stolen key chooses the name. What naming does stop is a stranger using a claim link that leaked. So keep `communities:ownership` for the few programs that need it, and watch the host audit trail for `owner_replacement.request`.
 
 ## Legal holds
 
