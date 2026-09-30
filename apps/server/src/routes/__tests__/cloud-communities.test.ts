@@ -112,6 +112,8 @@ interface Script {
   moveStartStatus: number;
   moveStartBody: unknown;
   moveBody: unknown;
+  /** What the move cancel answers with; anything but 200 is a refusal. */
+  cancelStatus: number;
   /** Upload answers in order. `0` breaks the connection instead of answering. */
   uploadStatus: number[];
   /** When set, the move start waits for this before answering. */
@@ -138,6 +140,7 @@ function defaultScript(): Script {
     moveStartStatus: 200,
     moveStartBody: null,
     moveBody: moveImportingFixture,
+    cancelStatus: 200,
     uploadStatus: [200],
     moveStartGate: null,
     entitlements: {
@@ -208,6 +211,13 @@ const fake = listeningServer(async (req, res) => {
     return send(res, script.moveStartStatus, script.moveStartBody);
   }
   if (route === 'POST /v1/communities/moves/move_0001/cancel') {
+    if (script.cancelStatus !== 200) {
+      return send(res, script.cancelStatus, {
+        code: 'temporarily_unavailable',
+        status: script.cancelStatus,
+        title: 'Try again shortly.',
+      });
+    }
     return send(res, 200, moveCancelledFixture);
   }
   if (route === 'GET /v1/communities/moves/move_0001') return send(res, 200, script.moveBody);
@@ -336,6 +346,8 @@ describe('unlinked', () => {
       .send(Buffer.from('zip bytes'))
       .expect(200);
     expect(move.body.ok).toBe(false);
+    const room = await request(server).get('/api/cloud/communities/moves/room?bytes=9').expect(200);
+    expect(room.body).toMatchObject({ ok: false, message: expect.any(String) });
     const claim = await request(server)
       .post(`/api/cloud/communities/${startFixture.community.communityId}/claim-link`)
       .expect(200);
@@ -527,9 +539,12 @@ describe('starting a community and claiming it', () => {
       .post('/api/cloud/communities')
       .send({ idempotencyKey: 'k', name: 'Acme' })
       .expect(200);
+    // The service may have made the community before it broke, so a retry
+    // with the same key is the safe next step.
     expect(res.body).toEqual({
       ok: false,
       message: 'Couldn’t reach your DorkOS account. Try again.',
+      mayExist: true,
     });
   });
 
@@ -804,6 +819,34 @@ describe('moving a community in', () => {
     expect(stagedCopies()).toHaveLength(0);
   });
 
+  // Purpose (DOR-2611): a server error from the service does not say the move
+  // was not made, so the refusal is marked `mayExist` and the app keeps its
+  // key; a 4xx it described (above) made nothing and is not marked. Fails if
+  // a 5xx problem, or no answer at all, reads as "nothing was made": the
+  // app's retry could then start a second move.
+  it('marks a refusal that may have made the move anyway', async () => {
+    const unavailable = {
+      code: 'temporarily_unavailable',
+      status: 503,
+      title: 'Try again shortly.',
+    };
+    script.moveStartStatus = 503;
+    script.moveStartBody = unavailable;
+    const fiveHundred = await startMoveRequest().expect(200);
+    expect(fiveHundred.body).toEqual({ ok: false, problem: unavailable, mayExist: true });
+
+    script.moveStartStatus = 200;
+    script.moveStartBody = { nonsense: true };
+    const nonsense = await startMoveRequest().expect(200);
+    expect(nonsense.body).toEqual({
+      ok: false,
+      message: 'Couldn’t reach your DorkOS account. Try again.',
+      mayExist: true,
+    });
+    expect(received.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    expect(stagedCopies()).toHaveLength(0);
+  });
+
   // Purpose (DOR-2587): an export this computer has no room for is refused
   // with both numbers before a byte is copied or a move exists; one that just
   // fits goes ahead. Fails if the room check is missing, off by the headroom,
@@ -866,6 +909,31 @@ describe('moving a community in', () => {
     expect(stagedCopies()).toHaveLength(0);
   });
 
+  // Purpose (DOR-2611): a person who presses Start again after the host-limit
+  // refusal, with the same file and name, reuses the same key, so the service
+  // replays the move that refusal cancelled. Fails if the route answers `ok`
+  // with a cancelled move (the app would show "cancelled" instead of a reason)
+  // or keeps the second copy.
+  it('refuses a replayed start of a move that was already cancelled, in plain words', async () => {
+    const answer = moveStartAnswer();
+    script.moveStartBody = {
+      ...answer,
+      upload: { ...answer.upload, maxBytes: archive.length - 1 },
+    };
+    await startMoveRequest().expect(413);
+
+    script.moveStartBody = { move: moveCancelledFixture, upload: null, replayed: true };
+    const again = await startMoveRequest().expect(409);
+    expect(again.body).toEqual({
+      ok: false,
+      message:
+        'That move was already cancelled, so nothing was sent on to the new host. Press Start moving to begin a new one.',
+    });
+    expect(received.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    expect(uploads.progress('move_0001')).toBeNull();
+    expect(stagedCopies()).toHaveLength(0);
+  });
+
   // Purpose (DOR-2587): the host's own limit decides, and a host that takes more
   // in parts than in one piece takes a move above its single-upload limit.
   // Fails if the single limit (or any fixed ceiling) refuses it.
@@ -907,6 +975,23 @@ describe('moving a community in', () => {
     expect(stagedCopies()).toHaveLength(0);
   });
 
+  // Purpose (DOR-2611): when the cancel after a too-large refusal does not go
+  // through, the move still exists, so the refusal says so and the app keeps
+  // its key. Fails if a failed cancel is answered like a clean one.
+  it('marks the too-large refusal when the move could not be cancelled', async () => {
+    const answer = moveStartAnswer();
+    script.moveStartBody = {
+      ...answer,
+      upload: { ...answer.upload, maxBytes: archive.length - 1 },
+    };
+    script.cancelStatus = 503;
+    const res = await startMoveRequest().expect(413);
+    expect(res.body).toMatchObject({ ok: false, mayExist: true });
+    expect(received.some((r) => r.path === '/v1/communities/moves/move_0001/cancel')).toBe(true);
+    expect(received.filter((r) => r.method === 'PUT')).toHaveLength(0);
+    expect(stagedCopies()).toHaveLength(0);
+  });
+
   // Purpose (DOR-2587): a parted limit smaller than the export is still the
   // host's limit. Fails if offering parts at all lets any size through.
   it('refuses an export larger than the host takes even in parts', async () => {
@@ -922,5 +1007,68 @@ describe('moving a community in', () => {
     await startMoveRequest().expect(413);
     expect(received.filter((r) => r.method === 'PUT')).toHaveLength(0);
     expect(stagedCopies()).toHaveLength(0);
+  });
+});
+
+describe('GET /api/cloud/communities/moves/room', () => {
+  /** Ask whether `bytes` would fit. */
+  function askRoom(bytes: number | string) {
+    return request(server).get(`/api/cloud/communities/moves/room?bytes=${bytes}`);
+  }
+
+  // Purpose (DOR-2610): the app asks before sending, and a file that won't fit
+  // is refused with both numbers, in the same words the upload itself would
+  // use, and with nothing sent to the service. Fails if the check is missing,
+  // is read as a move id, or words its refusal differently.
+  it('refuses a size the disk has no room for, with both numbers, and passes one that fits', async () => {
+    const bytes = 1_000;
+    disk.free = bytes + MOVE_STAGING_HEADROOM_BYTES - 1;
+    const refused = await askRoom(bytes).expect(200);
+    expect(refused.body).toEqual({
+      ok: false,
+      message:
+        'This computer doesn’t have room to hold the export. It needs 537 MB free and has 536 MB. Free up some space, then try again.',
+    });
+
+    disk.free = bytes + MOVE_STAGING_HEADROOM_BYTES;
+    const fits = await askRoom(bytes).expect(200);
+    expect(fits.body).toEqual({ ok: true });
+    expect(received).toHaveLength(0);
+    expect(stagedCopies()).toHaveLength(0);
+  });
+
+  // Purpose (DOR-2610): asking first holds nothing back, so the real upload
+  // that follows is not counted twice against the same free space. Fails if
+  // the room check reserves the bytes: the upload, on a disk with room for
+  // exactly one copy, would then be refused.
+  it('does not count the same export twice when the upload follows', async () => {
+    const archive = Buffer.from('PK\u0003\u0004 an owner export');
+    disk.free = archive.length + MOVE_STAGING_HEADROOM_BYTES;
+    expect((await askRoom(archive.length).expect(200)).body).toEqual({ ok: true });
+    script.moveStartBody = moveStartAnswer();
+    const res = await request(server)
+      .post('/api/cloud/communities/moves?idempotencyKey=after-room&name=Old%20garden')
+      .set('content-type', 'application/zip')
+      .send(archive)
+      .expect(200);
+    expect(res.body.ok).toBe(true);
+    expect(await uploadSettled('move_0001')).toMatchObject({ state: 'sent' });
+  });
+
+  // Purpose (DOR-2610): the same refusals as the upload for an empty file and
+  // an unreadable disk. Fails if either is let through as fitting.
+  it('refuses an empty file and a disk whose free space cannot be read', async () => {
+    const empty = await askRoom(0).expect(200);
+    expect(empty.body).toMatchObject({ ok: false, message: expect.stringMatching(/empty/) });
+    disk.fail = true;
+    const unknown = await askRoom(10).expect(200);
+    expect(unknown.body).toMatchObject({ ok: false, message: expect.stringMatching(/free space/) });
+  });
+
+  it('refuses a size that is not a whole number of bytes', async () => {
+    await askRoom('ten').expect(400);
+    await askRoom('-1').expect(400);
+    await askRoom('1e30').expect(400);
+    await askRoom(String(Number.MAX_SAFE_INTEGER) + '0').expect(400);
   });
 });

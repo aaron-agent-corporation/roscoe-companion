@@ -36,6 +36,7 @@ import type {
   CloudCommunityMove,
   CloudCommunityMovePollResponse,
   CloudCommunityMoveResponse,
+  CloudCommunityMoveRoomResponse,
   CloudCommunityNameCheckResponse,
   CloudCommunityRefusal,
   CloudCommunityRestoreResponse,
@@ -54,6 +55,7 @@ import {
   takeClaimLink,
 } from '../services/core/cloud/hosted-communities.js';
 import {
+  checkRoom,
   communityMoveUploads,
   discardStagedArchive,
   hostLimitBytes,
@@ -102,6 +104,22 @@ const MoveQuerySchema = z.object({
   name: NameSchema,
   shortName: CommunityShortNameSchema.optional(),
 });
+
+/** The query `GET /moves/room` takes: the export's size in bytes. */
+const RoomQuerySchema = z.object({
+  bytes: z
+    .string()
+    .regex(/^\d+$/)
+    .transform(Number)
+    .refine((bytes) => Number.isSafeInteger(bytes)),
+});
+
+/**
+ * What a person reads when they start again with the same file and name as a
+ * move that was already cancelled (the start that cancelled it said why).
+ */
+const MOVE_ALREADY_CANCELLED =
+  'That move was already cancelled, so nothing was sent on to the new host. Press Start moving to begin a new one.';
 
 /**
  * A size in the units a person's own computer shows (powers of 1000, as
@@ -171,7 +189,10 @@ function stagingRefusal(error: StagingError): { status: number; message: string 
  * Answer a failed write in words a person can act on.
  *
  * The service's own problem envelope when it described the refusal; otherwise
- * one plain sentence, never the error's own text.
+ * one plain sentence, never the error's own text. Marked `mayExist` when the
+ * write may still have gone through: the service could not be reached, or it
+ * answered with a server error (5xx), which does not say nothing was made.
+ * A refusal it described with a 4xx made nothing.
  *
  * @param res - The response to answer on.
  * @param error - What the write rejected with.
@@ -179,9 +200,19 @@ function stagingRefusal(error: StagingError): { status: number; message: string 
  */
 function writeFailed(res: Response, error: unknown, what: string) {
   const problem = problemOf(error);
-  if (problem !== null) return res.json({ ok: false, problem } satisfies CloudCommunityRefusal);
+  if (problem !== null) {
+    return res.json({
+      ok: false,
+      problem,
+      ...(problem.status >= 500 ? { mayExist: true as const } : {}),
+    } satisfies CloudCommunityRefusal);
+  }
   logger.warn(`[Cloud] Could not ${what}`, logError(error));
-  return res.json({ ok: false, message: UNREACHABLE } satisfies CloudCommunityRefusal);
+  return res.json({
+    ok: false,
+    message: UNREACHABLE,
+    mayExist: true,
+  } satisfies CloudCommunityRefusal);
 }
 
 /**
@@ -306,6 +337,29 @@ export function createCloudCommunitiesRouter(
   });
 
   /**
+   * GET /moves/room?bytes= — whether an export of this size fits on this
+   * computer, asked before the browser sends it. The same check `POST /moves`
+   * makes as the file arrives, and like it, nothing is held back: that check
+   * runs again. Answers 200 either way, with the same plain refusal.
+   */
+  router.get('/moves/room', async (req, res) => {
+    if (!isCloudLinked())
+      return res.json({ ok: false, message: NOT_LINKED } satisfies CloudCommunityRefusal);
+    const query = RoomQuerySchema.safeParse(req.query);
+    if (!query.success) return res.status(400).json({ error: 'That isn’t a file size.' });
+    try {
+      await checkRoom(query.data.bytes);
+    } catch (error) {
+      if (!(error instanceof StagingError)) throw error;
+      return res.json({
+        ok: false,
+        message: stagingRefusal(error).message,
+      } satisfies CloudCommunityRefusal);
+    }
+    return res.json({ ok: true } satisfies CloudCommunityMoveRoomResponse);
+  });
+
+  /**
    * POST /moves?idempotencyKey=&name=&shortName= — start a move with the
    * export as the body. Answers once the file is here and the move exists; the
    * upload to the Community server then runs on its own.
@@ -378,12 +432,29 @@ export function createCloudCommunitiesRouter(
       // be refused by the Community server. Stop before a byte leaves.
       const limit = hostLimitBytes(started.upload);
       await discardStagedArchive(staged);
-      await cancelMove(started.move.moveId).catch((error: unknown) =>
-        logger.warn('[Cloud] Could not cancel a move too large for its host', logError(error))
+      // When the cancel does not go through, the move still exists; say so,
+      // so a retry with the same key picks it up rather than making another.
+      const cancelled = await cancelMove(started.move.moveId).then(
+        () => true,
+        (error: unknown) => {
+          logger.warn('[Cloud] Could not cancel a move too large for its host', logError(error));
+          return false;
+        }
       );
       return res.status(413).json({
         ok: false,
         message: `This export is too large for the new host. It is ${describeBytes(staged.bytes, 'up')}, and the most the host takes is ${describeBytes(limit, 'down')}.`,
+        ...(cancelled ? {} : { mayExist: true as const }),
+      } satisfies CloudCommunityRefusal);
+    }
+    if (started.upload === null && started.move.state === 'cancelled') {
+      // A replay of a move that was cancelled, most often by the refusal just
+      // above on an earlier try. Answering `ok` would show the person a
+      // cancelled move in place of a reason, so say what happened.
+      await discardStagedArchive(staged);
+      return res.status(409).json({
+        ok: false,
+        message: MOVE_ALREADY_CANCELLED,
       } satisfies CloudCommunityRefusal);
     }
     if (started.upload !== null) {
