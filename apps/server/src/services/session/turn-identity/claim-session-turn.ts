@@ -1,46 +1,14 @@
 /**
- * Making an attended task run a first-class turn on a first-class session.
+ * Give background task and Relay turns the same session view as chat turns.
  *
- * A run executes a real agent turn, but it used to consume that turn's event
- * stream privately: it counted refusals, kept 500 characters of text, and threw
- * everything else away. Nothing else on the server ever saw the stream, so no
- * {@link SessionStateProjector} existed for the run's session, and none of the
- * apparatus a person's turn gets applied to it either.
+ * Claim the turn queue and write lock before consuming the runtime stream.
+ * Feed its events into the session projector so approvals, questions, and Stop
+ * are available in the app. Follow canonical session renames with the lock and
+ * projector, then withdraw pending interactions and release the claim on exit.
  *
- * That is invisible for a run nobody is watching. It is a bug for a "Run now" a
- * person clicked: the runtime raises an approval card for that run (only a
- * SCHEDULED fire refuses its asks outright), and with no projector behind the
- * session the card reaches none of the places asks are answered — not
- * `GET /api/sessions/pending-interactions`, not the `interaction_pending`
- * fan-out on `GET /api/events`, so not the header tray, the Pulse panel or the
- * Home triage header either. The agent then waited on a person who was never
- * shown anything.
+ * The caller still owns runtime execution and cancellation.
  *
- * So an attended run now claims its session the way a dispatch does, and this
- * module is that claim. In order:
- *
- * 1. **A slot in the session's turn chain**, so two runs the scheduler starts on
- *    one session are ordered by arrival rather than racing.
- * 2. **The session write-lock**, which is the only thing that serializes against
- *    a DIFFERENT writer — a person mid-turn in the very session a sticky task
- *    resumes. A run waits for it rather than barging: two concurrent
- *    `feedProjector` streams on one projector is the hazard
- *    `session-event-normalizer.ts` describes, where whichever finishes first
- *    retires the other's live subagents.
- * 3. **A settle of whatever turn the session still has open**, for the same
- *    reason and in the same order as `triggerTurn` — `feedProjector` mints this
- *    turn's `turn_start` before it pulls the stream once, so a turn settled any
- *    later settles INSIDE this one.
- * 4. **The projection itself**, plus following the runtime's rename of the
- *    session through {@link createCanonicalRekey} — the same step, from the same
- *    module, a person's turn runs. Without it the run row names a canonical id
- *    whose projector does not exist, and the durable rows stay behind under the
- *    id nobody will ask for again.
- *
- * The run keeps its own consumption throughout: it still owns the stop race and
- * its own row. This is a second, read-only view of the same events.
- *
- * @module services/tasks/session/run-projection
+ * @module services/session/turn-identity/claim-session-turn
  */
 import type { StreamEvent } from '@dorkos/shared/types';
 import type { RuntimeCapabilities, SseResponse } from '@dorkos/shared/agent-runtime';
@@ -54,11 +22,11 @@ import {
   sessionTurnQueue,
   settleOpenTurnBefore,
   type SessionStateProjector,
-} from '../../session/index.js';
+} from '../index.js';
 import { SESSIONS } from '../../../config/constants.js';
 import { createTaggedLogger, logError } from '../../../lib/logger.js';
 
-const logger = createTaggedLogger('Tasks');
+const logger = createTaggedLogger('SessionTurn');
 
 /**
  * The lock identity every task run holds.
@@ -70,6 +38,9 @@ const logger = createTaggedLogger('Tasks');
  */
 export const TASK_RUN_CLIENT_ID = 'dorkos-task-scheduler';
 
+/** Lock identity for agent messages opened through Relay. */
+export const RELAY_TURN_CLIENT_ID = 'dorkos-relay';
+
 /** How long a run waits for a session somebody else is using, before giving up. */
 const SESSION_WAIT_MS = SESSIONS.LOCK_TTL_MS;
 
@@ -78,7 +49,7 @@ const LOCK_RETRY_STEP_MS = 250;
 
 /** What a run is failed with when the session never came free. */
 export const SESSION_BUSY_ERROR =
-  'This task shares a session that somebody else was using the whole time, so the run never started.';
+  'This session stayed busy with another turn, so this turn could not start.';
 
 /**
  * The runtime seams a run's turn needs. Every `AgentRuntime` satisfies it.
@@ -87,7 +58,7 @@ export const SESSION_BUSY_ERROR =
  * runtime capability, and this module supplies it so a caller cannot wire a
  * rename that moves the lock but not the projector.
  */
-export interface RunTurnPort {
+export interface SessionTurnPort {
   /** The runtime's own id for a session key, once it has minted or kept one. */
   getInternalSessionId(sessionId: string): string | undefined;
   /** Take the session write-lock under an id. */
@@ -99,7 +70,7 @@ export interface RunTurnPort {
 }
 
 /** A run's claim on its session, for as long as its turn lasts. */
-export interface RunTurn {
+export interface SessionTurnClaim {
   /** Show one of the run's stream events to the session projection. */
   observe: (event: StreamEvent) => void;
   /**
@@ -191,6 +162,25 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+/** Wait for work or cancellation, removing the listener on either outcome. */
+async function waitForClaim(work: Promise<unknown>, signal?: AbortSignal): Promise<boolean> {
+  if (!signal) {
+    await work;
+    return true;
+  }
+  if (signal.aborted) return false;
+  let onAbort!: () => void;
+  const cancelled = new Promise<boolean>((resolve) => {
+    onAbort = () => resolve(false);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work.then(() => !signal.aborted), cancelled]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 /**
  * Take the session write-lock, waiting for whoever holds it to be done.
  *
@@ -209,17 +199,23 @@ function delay(ms: number): Promise<void> {
 async function acquireSessionLock(
   sessionId: string,
   projector: SessionStateProjector,
-  deps: RunTurnPort,
+  deps: SessionTurnPort,
   holder: SseResponse,
-  token: symbol
+  token: symbol,
+  clientId: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
   const deadline = Date.now() + SESSION_WAIT_MS;
   for (;;) {
-    if (deps.acquireLock(sessionId, TASK_RUN_CLIENT_ID, holder, token)) return true;
+    if (signal?.aborted) return false;
+    if (deps.acquireLock(sessionId, clientId, holder, token)) return true;
     const remaining = deadline - Date.now();
     if (remaining <= 0) return false;
-    await delay(Math.min(LOCK_RETRY_STEP_MS, remaining));
-    await projector.awaitTurnSettled(Math.max(0, deadline - Date.now()));
+    if (!(await waitForClaim(delay(Math.min(LOCK_RETRY_STEP_MS, remaining)), signal))) return false;
+    if (
+      !(await waitForClaim(projector.awaitTurnSettled(Math.max(0, deadline - Date.now())), signal))
+    )
+      return false;
   }
 }
 
@@ -247,21 +243,27 @@ async function acquireSessionLock(
  * @returns The claim, or `null` when the session never came free — the caller
  *   fails the run with {@link SESSION_BUSY_ERROR}.
  */
-export async function claimRunTurn(opts: {
+export async function claimSessionTurn(opts: {
+  /** The background caller holding this turn. */
+  clientId: string;
+  signal?: AbortSignal;
   sessionId: string;
   cwd: string;
   prompt: string;
   capabilities: RuntimeCapabilities | undefined;
-  runtime: RunTurnPort;
-}): Promise<RunTurn | null> {
-  const { sessionId, runtime } = opts;
+  runtime: SessionTurnPort;
+}): Promise<SessionTurnClaim | null> {
+  const { sessionId, runtime, clientId } = opts;
   // The id the lock and the chain are filed under. It starts as whatever the
   // runtime already resolves this session to and moves if the runtime renames it
   // mid-turn — the same rule, for the same reason, as a person's turn.
   let turnKey = runtime.getInternalSessionId(sessionId) ?? sessionId;
 
-  const slot = sessionTurnQueue.reserve(turnKey, TASK_RUN_CLIENT_ID, SESSION_WAIT_MS);
-  await slot.ready;
+  const slot = sessionTurnQueue.reserve(turnKey, clientId, SESSION_WAIT_MS);
+  if (!(await waitForClaim(slot.ready, opts.signal))) {
+    slot.release();
+    return null;
+  }
 
   const projector = getOrCreateProjector(sessionId, opts.cwd, {
     persist: persistenceModeFor(opts.capabilities ?? {}),
@@ -271,8 +273,18 @@ export async function claimRunTurn(opts: {
   // lock's TTL while the person reads the card — which is what the
   // pending-interaction probe answers.
   const lifecycle = new DetachedTurnLifecycle(() => projector.hasPendingInteractions());
-  const lockToken = Symbol('task-run-lock');
-  if (!(await acquireSessionLock(turnKey, projector, runtime, lifecycle, lockToken))) {
+  const lockToken = Symbol('background-turn-lock');
+  if (
+    !(await acquireSessionLock(
+      turnKey,
+      projector,
+      runtime,
+      lifecycle,
+      lockToken,
+      clientId,
+      opts.signal
+    ))
+  ) {
     slot.release();
     return null;
   }
@@ -283,7 +295,7 @@ export async function claimRunTurn(opts: {
     released = true;
     // `turnKey`, not the id we started with: a mid-turn rename moves the lock,
     // and the release has to target wherever it ended up.
-    runtime.releaseLock(turnKey, TASK_RUN_CLIENT_ID, lockToken);
+    runtime.releaseLock(turnKey, clientId, lockToken);
     lifecycle.close();
     slot.release();
   };
@@ -300,7 +312,7 @@ export async function claimRunTurn(opts: {
 
   const tryRekey = createCanonicalRekey({
     sessionId,
-    clientId: TASK_RUN_CLIENT_ID,
+    clientId,
     holder: lifecycle,
     lockToken,
     // Wrapped call-by-call, never spread: a runtime is a CLASS INSTANCE and its
@@ -340,6 +352,7 @@ export async function claimRunTurn(opts: {
 
   return {
     observe: (event) => {
+      lifecycle.touch();
       source.push(event);
       // Every event, until the rename lands — see `createCanonicalRekey` for why
       // one read at the first event is not enough.

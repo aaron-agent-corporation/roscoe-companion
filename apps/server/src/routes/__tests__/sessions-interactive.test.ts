@@ -15,6 +15,7 @@ vi.mock('../../services/core/runtime-registry.js', () => ({
     resolveForSession: vi.fn(async () => fakeRuntime),
     getSessionRuntimeType: vi.fn(async () => 'fake'),
     persistSessionRuntime: vi.fn(async () => {}),
+    getSessionSettingsMany: vi.fn(() => new Map()),
     has: vi.fn(() => true),
   },
   RuntimeNotRegisteredError: class RuntimeNotRegisteredError extends Error {
@@ -49,6 +50,7 @@ vi.mock('@dorkos/shared/manifest', () => ({
 // against the default cwd don't require initBoundary() at startup.
 vi.mock('../../lib/boundary.js', () => ({
   validateBoundary: vi.fn(async (p: string) => p),
+  validateBoundaryOrDorkHome: vi.fn(async (p: string) => p),
   getBoundary: vi.fn(() => '/mock/home'),
   initBoundary: vi.fn().mockResolvedValue('/mock/home'),
   isWithinBoundary: vi.fn().mockResolvedValue(true),
@@ -76,6 +78,35 @@ beforeEach(() => {
   fakeRuntime = new FakeAgentRuntime();
   vi.clearAllMocks();
 });
+
+it.each(['01ARZ3NDEKTSV4RRFFQ69G5FAV', '01ARZ3NDEKTSV4RRFFQ69G5FAV:context-1'])(
+  'opens, approves, and stops a Relay session through HTTP (%s)',
+  async (id) => {
+    fakeRuntime.getSession.mockResolvedValue({
+      id,
+      title: 'Relay conversation',
+      runtime: 'fake',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      permissionMode: 'default',
+    });
+    fakeRuntime.approveTool.mockReturnValue(true);
+    const url = `/api/sessions/${encodeURIComponent(id)}`;
+    const opened = await request(testServer).get(url);
+    expect({ status: opened.status, error: opened.body.error }).toEqual({
+      status: 200,
+      error: undefined,
+    });
+    expect(
+      (await request(testServer).post(`${url}/approve`).send({ toolCallId: 'ask' })).status
+    ).toBe(200);
+    expect((await request(testServer).post(`${url}/interrupt`)).status).toBe(200);
+    expect(fakeRuntime.approveTool).toHaveBeenCalledWith(id, 'ask', true, {
+      alwaysAllow: undefined,
+    });
+    expect(fakeRuntime.interruptQuery).toHaveBeenCalledWith(id);
+  }
+);
 
 describe('POST /api/sessions/:id/submit-answers', () => {
   it('returns 200 when pending question exists', async () => {

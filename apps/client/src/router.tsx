@@ -312,8 +312,25 @@ export async function sessionRouteLoader({
   context: RouterContext;
   deps: SessionLoaderDeps;
 }) {
-  // Session already specified — nothing to do
-  if (deps.session) return;
+  // Notification links name a session but may omit its folder. Resolve that
+  // folder before mounting the chat: otherwise its transcript uses the new id
+  // while its agent identity and composer inherit the previous selection.
+  if (deps.session) {
+    // Launch links can name a fresh id that has no server record yet.
+    if (deps.dir || deps.runtime || deps.prompt || deps.seed) return;
+    const session = await context.transport.getSession(deps.session).catch((error: unknown) => {
+      // A fresh empty chat has an id before its first message creates a record.
+      if (error instanceof Error && 'status' in error && error.status === 404) return null;
+      throw error;
+    });
+    if (session === null) return;
+    if (!session.cwd) throw new Error(SESSION_LOOKUP_FAILED_MESSAGE);
+    throw redirect({
+      to: SESSION_ROUTE,
+      search: (prev) => ({ ...prev, dir: session.cwd }),
+      replace: true,
+    });
+  }
 
   const { dir, runtime } = deps;
   // `runtime` is the launch-time runtime selection: it must survive both

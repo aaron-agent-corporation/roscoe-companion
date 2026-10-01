@@ -17,6 +17,18 @@ describe('parseSessionId', () => {
     expect(parseSessionId(uuid)).toBe(uuid);
   });
 
+  it.each(['01ARZ3NDEKTSV4RRFFQ69G5FAV', '01ARZ3NDEKTSV4RRFFQ69G5FAV:context-1'])(
+    'accepts a runtime-owned Relay session %s',
+    (id) => expect(parseSessionId(id)).toBe(id)
+  );
+
+  it.each(['../x', 'a/b', 'a\\b', 'a%2fb', 'a?b', 'a#b', 'a:b', 'a.b', 'a'.repeat(129)])(
+    'rejects an unsafe Relay partition %s',
+    (suffix) => {
+      expect(parseSessionId(`01ARZ3NDEKTSV4RRFFQ69G5FAV:${suffix}`)).toBeNull();
+    }
+  );
+
   it('returns null for path traversal strings', () => {
     expect(parseSessionId('../../../etc/passwd')).toBeNull();
   });

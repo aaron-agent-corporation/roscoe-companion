@@ -18,7 +18,8 @@
  *
  * @module server/services/session/attachments/local-session-attachment-store
  */
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import { SessionIdSchema } from '@dorkos/shared/schemas';
 import { createReadStream } from 'fs';
 import { mkdir, rename, stat, utimes, writeFile } from 'fs/promises';
 import path from 'path';
@@ -46,6 +47,13 @@ import {
  * which live comfortably inside this.
  */
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/** Encode scoped Relay ids for filesystems that forbid colons, including Windows. */
+function sessionDirectoryKey(sessionId: string): string | null {
+  if (SAFE_ID.test(sessionId)) return sessionId;
+  if (!SessionIdSchema.safeParse(sessionId).success) return null;
+  return `relay-${createHash('sha256').update(sessionId).digest('hex')}`;
+}
 
 /** A session's generated images on this machine's disk. */
 export class LocalSessionAttachmentStore implements SessionAttachmentStore {
@@ -206,7 +214,7 @@ export class LocalSessionAttachmentStore implements SessionAttachmentStore {
   urlFor(sessionId: string, attachmentId: string, mediaType: string): string | null {
     const extension = storableImageExtension(mediaType);
     if (!extension) return null;
-    if (!SAFE_ID.test(sessionId) || !SAFE_ID.test(attachmentId)) return null;
+    if (!sessionDirectoryKey(sessionId) || !SAFE_ID.test(attachmentId)) return null;
     return attachmentUrl(sessionId, attachmentId, extension);
   }
 
@@ -234,8 +242,8 @@ export class LocalSessionAttachmentStore implements SessionAttachmentStore {
 
   /** Where one session's images live, refusing a session id that could be a path. */
   private dirFor(sessionId: string): string {
-    if (!SAFE_ID.test(sessionId)) throw new InvalidSessionAttachmentIdError(sessionId);
-    const dir = path.resolve(this.root, sessionId, 'attachments');
+    if (!sessionDirectoryKey(sessionId)) throw new InvalidSessionAttachmentIdError(sessionId);
+    const dir = path.resolve(this.root, sessionDirectoryKey(sessionId)!, 'attachments');
     if (path.dirname(path.dirname(dir)) !== path.resolve(this.root)) {
       throw new InvalidSessionAttachmentIdError(sessionId);
     }
@@ -265,7 +273,7 @@ export class LocalSessionAttachmentStore implements SessionAttachmentStore {
     attachmentId: string,
     extension: string
   ): string | null {
-    if (!SAFE_ID.test(sessionId) || !SAFE_ID.test(attachmentId)) return null;
+    if (!sessionDirectoryKey(sessionId) || !SAFE_ID.test(attachmentId)) return null;
     if (!imageMediaTypeForExtension(extension)) return null;
     return this.fileFor(sessionId, attachmentId, extension);
   }

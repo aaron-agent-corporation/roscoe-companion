@@ -1647,8 +1647,16 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "string",
+                "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}(?::[A-Za-z0-9_-]{1,128})?$"
+              }
+            ]
           },
           "title": {
             "type": "string"

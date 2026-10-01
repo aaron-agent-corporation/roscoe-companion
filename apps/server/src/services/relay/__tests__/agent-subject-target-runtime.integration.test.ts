@@ -20,6 +20,8 @@
  * runtime, so before this the default one answered — a Codex agent replying in
  * Claude Code, under its own name.
  */
+import { SessionSchema } from '@dorkos/shared/schemas';
+import { parseSessionId } from '../../../lib/route-utils.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,7 +35,17 @@ import { runtimeRegistry } from '../../core/runtime-registry.js';
 import { createAdapter } from '../adapter-factory.js';
 import { CanonicalConnectorRuntimeAuthorityResolver } from '../../connectors/principal/runtime-authority-resolver.js';
 
-const AGENT_ID = '01AGENTULIDDOR1627';
+import {
+  disposeProjector,
+  listPendingInteractionsAcrossSessions,
+  peekProjector,
+} from '../../session/session-state-projector.js';
+import {
+  claimSessionTurn,
+  RELAY_TURN_CLIENT_ID,
+} from '../../session/turn-identity/claim-session-turn.js';
+
+const AGENT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MESH_SUBJECT = `relay.agent.ana.${AGENT_ID}`;
 /** The id claude-code renames its session to once a turn has started. */
 const SDK_ID = '550e8400-e29b-41d4-a716-446655440000';
@@ -179,8 +191,174 @@ describe('a mesh agent subject runs on the target agent’s own runtime', () => 
 
   afterEach(async () => {
     await adapter.stop();
+    disposeProjector(AGENT_ID);
+    disposeProjector(SDK_ID);
     await rm(agentDir, { recursive: true, force: true });
   });
+
+  it('refreshes a streaming Relay turn’s lock before it can expire', async () => {
+    const clock = vi.spyOn(Date, 'now');
+    const started = Date.now();
+    clock.mockReturnValue(started);
+    const claim = await claimSessionTurn({
+      clientId: RELAY_TURN_CLIENT_ID,
+      sessionId: SDK_ID,
+      cwd: agentDir,
+      prompt: 'Work',
+      runtime: claude,
+      capabilities: claude.getCapabilities(),
+    });
+    try {
+      const holder = claude.acquireLock.mock.calls[0]![2] as unknown as {
+        lastActivityAt(): number;
+      };
+      clock.mockReturnValue(started + 6 * 60_000);
+      claim!.observe({ type: 'text_delta', data: { text: 'still working' } });
+      expect(holder.lastActivityAt()).toBe(started + 6 * 60_000);
+    } finally {
+      await claim?.finish();
+      clock.mockRestore();
+    }
+  });
+
+  it.each([undefined, 'context-1'])(
+    'exposes a Codex approval with an openable session id (%s)',
+    async (conversationId) => {
+      await writeAgentManifest('codex', agentDir);
+      let resume!: () => void;
+      const answered = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const id = conversationId ? `${AGENT_ID}:${conversationId}` : AGENT_ID;
+      codex.withScenarios([
+        async function* () {
+          yield {
+            type: 'approval_required',
+            data: {
+              toolCallId: 'codex-ask',
+              toolName: 'Bash',
+              input: '{}',
+              timeoutMs: 600_000,
+              startedAt: Date.now(),
+              hasSuggestions: false,
+            },
+          } as StreamEvent;
+          await answered;
+        },
+      ]);
+      const envelope = agentEnvelope();
+      envelope.payload = { content: 'Work', ...(conversationId ? { conversationId } : {}) };
+      const delivery = adapter.deliver(MESH_SUBJECT, envelope, {
+        agent: { directory: agentDir, runtime: 'codex' },
+      });
+      try {
+        await vi.waitFor(() => expect(listPendingInteractionsAcrossSessions()).toHaveLength(1));
+        expect(listPendingInteractionsAcrossSessions()[0]?.sessionId).toBe(id);
+        expect(parseSessionId(id)).toBe(id);
+        expect(SessionSchema.shape.id.safeParse(id).success).toBe(true);
+      } finally {
+        resume();
+        await delivery;
+        disposeProjector(id);
+      }
+    }
+  );
+
+  it('refuses unsafe conversation ids before starting the runtime', async () => {
+    await writeAgentManifest('codex', agentDir);
+    const envelope = agentEnvelope();
+    envelope.payload = { content: 'Work', conversationId: '../outside' };
+    const result = await adapter.deliver(MESH_SUBJECT, envelope, {
+      agent: { directory: agentDir, runtime: 'codex' },
+    });
+    expect(result.success).toBe(false);
+    expect(codex.ensureSession).not.toHaveBeenCalled();
+    expect(codex.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('expires while waiting for a person’s session without interrupting their turn', async () => {
+    await writeAgentManifest('claude-code', agentDir);
+    claude.acquireLock.mockReturnValue(false);
+    const envelope = agentEnvelope();
+    envelope.budget.ttl = Date.now() + 250;
+    const result = await adapter.deliver(MESH_SUBJECT, envelope, {
+      agent: { directory: agentDir, runtime: 'claude-code' },
+    });
+    expect(result.success).toBe(false);
+    expect(claude.acquireLock).toHaveBeenCalled();
+    expect(claude.ensureSession).not.toHaveBeenCalled();
+    expect(claude.sendMessage).not.toHaveBeenCalled();
+    expect(claude.interruptQuery).not.toHaveBeenCalled();
+    expect(listPendingInteractionsAcrossSessions()).toEqual([]);
+  });
+
+  it.each(['complete', 'fail'] as const)(
+    'shows a Relay approval on its canonical session and releases it when the turn ends (%s)',
+    async (ending) => {
+      await writeAgentManifest('claude-code', agentDir);
+      let resume!: () => void;
+      const answered = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let renamed = false;
+      const locks = new Map<string, string>();
+      claude.acquireLock.mockImplementation((id, client) => {
+        if (locks.has(id) && locks.get(id) !== client) return false;
+        locks.set(id, client);
+        return true;
+      });
+      claude.releaseLock.mockImplementation((id, client) => {
+        if (locks.get(id) === client) locks.delete(id);
+      });
+      claude.getInternalSessionId.mockImplementation(() => (renamed ? SDK_ID : undefined));
+      claude.withScenarios([
+        async function* () {
+          renamed = true;
+          yield {
+            type: 'approval_required',
+            data: {
+              toolCallId: 'relay-approval',
+              toolName: 'Bash',
+              input: JSON.stringify({ command: 'echo hello' }),
+              timeoutMs: 600_000,
+              startedAt: Date.now(),
+              hasSuggestions: false,
+            },
+          } as StreamEvent;
+          await answered;
+          if (ending === 'fail') throw new Error('runtime stopped');
+          yield { type: 'done', data: { sessionId: SDK_ID } } as StreamEvent;
+        },
+      ]);
+      const delivery = adapter.deliver(MESH_SUBJECT, agentEnvelope(), {
+        agent: { directory: agentDir, runtime: 'claude-code' },
+      });
+      try {
+        await vi.waitFor(() => {
+          const pending = listPendingInteractionsAcrossSessions();
+          expect(pending).toHaveLength(1);
+          expect(pending[0]).toMatchObject({
+            sessionId: SDK_ID,
+            cwd: agentDir,
+            interaction: { id: 'relay-approval' },
+          });
+        });
+        expect(locks.get(SDK_ID)).toBe(RELAY_TURN_CLIENT_ID);
+        expect(locks.has(AGENT_ID)).toBe(false);
+        const snapshot = await peekProjector(SDK_ID)!.buildSnapshot(async () => []);
+        expect(snapshot.inProgressTurn).not.toBeNull();
+        expect(snapshot.pendingInteractions[0]?.id).toBe('relay-approval');
+      } finally {
+        resume();
+        await delivery;
+      }
+      expect(listPendingInteractionsAcrossSessions()).toEqual([]);
+      expect(locks.size).toBe(0);
+      expect(
+        (await peekProjector(SDK_ID)!.buildSnapshot(async () => [])).inProgressTurn
+      ).toBeNull();
+    }
+  );
 
   it('answers a codex agent on codex, not on the default runtime', async () => {
     await writeAgentManifest('codex', agentDir);

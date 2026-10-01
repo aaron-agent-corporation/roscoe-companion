@@ -4,13 +4,12 @@
  *
  * @module lib/route-utils
  */
+import { SessionIdSchema } from '@dorkos/shared/schemas';
 import type { Response } from 'express';
 import type { Readable } from 'stream';
 import type { ZodSchema } from 'zod';
 import { z } from 'zod';
 import { validateBoundary, validateBoundaryOrDorkHome, BoundaryError } from './boundary.js';
-
-const uuidSchema = z.string().uuid();
 
 /**
  * Parse and validate a request body against a Zod schema.
@@ -42,16 +41,16 @@ export function toErrorMessage(err: unknown, fallback = 'Internal server error')
 }
 
 /**
- * Validate that a raw route param is a valid UUID.
+ * Validate that a raw route param is a valid session ID.
  *
  * Accepts `unknown` so raw `req.params` values (typed `string | string[]` by
  * Express 5 typings) flow straight in — a non-string is simply invalid.
  *
  * @param id - The raw value to validate
- * @returns The validated UUID string, or `null` if invalid
+ * @returns The validated session ID, or `null` if invalid
  */
 export function parseSessionId(id: unknown): string | null {
-  const result = uuidSchema.safeParse(id);
+  const result = SessionIdSchema.safeParse(id);
   return result.success ? result.data : null;
 }
 

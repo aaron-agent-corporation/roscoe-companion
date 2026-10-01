@@ -569,9 +569,23 @@ export const SessionStartedBySchema = z
 /** Who started a chat. See {@link SessionStartedBySchema}. */
 export type SessionStartedBy = z.infer<typeof SessionStartedBySchema>;
 
+/** Safe caller-supplied partition for an agent's Relay conversation. */
+export const SessionConversationIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+
+/**
+ * Chat UUIDs and runtime-owned Relay agent scopes. Codex keeps the agent ULID
+ * (optionally followed by a conversation partition) as its durable session key.
+ * Keep these ids intact so old conversations remain reachable. No path, query,
+ * percent-encoded, or control characters are accepted.
+ */
+export const SessionIdSchema = z.union([
+  z.string().uuid(),
+  z.string().regex(/^[0-7][0-9A-HJKMNP-TV-Z]{25}(?::[A-Za-z0-9_-]{1,128})?$/),
+]);
+
 export const SessionSchema = z
   .object({
-    id: z.string().uuid(),
+    id: SessionIdSchema,
     title: z.string(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),

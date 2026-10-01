@@ -180,6 +180,21 @@ export type SessionRuntimePreparer = (
   binding: Parameters<SessionRuntimeBinder>[0]
 ) => Promise<() => Promise<void>>;
 
+/** The server's durable session view of a Relay turn. */
+export interface RelaySessionTurn {
+  observe(event: StreamEvent): void;
+  finish(): Promise<void>;
+}
+
+/** Claim the session and expose its live prompts before the runtime starts. */
+export type SessionTurnClaimer = (input: {
+  sessionId: string;
+  runtimeType: string;
+  cwd: string;
+  prompt: string;
+  signal: AbortSignal;
+}) => Promise<RelaySessionTurn>;
+
 /**
  * Minimal interface for agent session management.
  *
@@ -418,6 +433,8 @@ export interface ClaudeCodeAdapterDeps {
   bindSessionRuntime?: SessionRuntimeBinder;
   /** Temporary authority needed before a first runtime turn can open its tools. */
   prepareSessionRuntime?: SessionRuntimePreparer;
+  /** Project agent turns into the app so requests and Stop stay reachable. */
+  claimSessionTurn?: SessionTurnClaimer;
   /**
    * Whether a click on a chat platform may authorize one session's tool call.
    *

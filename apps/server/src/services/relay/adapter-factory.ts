@@ -6,6 +6,11 @@
  *
  * @module services/relay/adapter-factory
  */
+import {
+  claimSessionTurn,
+  RELAY_TURN_CLIENT_ID,
+  SESSION_BUSY_ERROR,
+} from '../session/turn-identity/claim-session-turn.js';
 import { createTurnDeskCheck } from '../core/agent-identity/turn-desk-check.js';
 import { resolveSessionCwd } from '../workspace/resolve-session-cwd.js';
 import { dirname } from 'node:path';
@@ -163,6 +168,20 @@ export async function createAdapter(
       const agentManager = defaultRuntimeFor(deps.agentRuntimes, config.id);
       return new ClaudeCodeAdapter(config.id, config.config as Record<string, unknown>, {
         agentManager,
+        claimSessionTurn: async ({ sessionId, runtimeType, cwd, prompt, signal }) => {
+          const runtime = runtimeRegistry.get(runtimeType);
+          const claim = await claimSessionTurn({
+            sessionId,
+            cwd,
+            prompt,
+            runtime,
+            clientId: RELAY_TURN_CLIENT_ID,
+            signal,
+            capabilities: runtime.getCapabilities(),
+          });
+          if (!claim) throw new Error(SESSION_BUSY_ERROR);
+          return claim;
+        },
         agentRuntimes: deps.agentRuntimes,
         traceStore: deps.traceStore,
         taskStore: deps.taskStore,

@@ -32,7 +32,7 @@ import {
   type SchedulerAgentManager,
 } from '../task-scheduler-service.js';
 import { RELAY_DISPATCH_OK } from '../../relay/task-dispatch/readiness.js';
-import { TASK_RUN_CLIENT_ID } from '../session/run-projection.js';
+import { TASK_RUN_CLIENT_ID } from '../../session/turn-identity/claim-session-turn.js';
 import { TaskStore } from '../task-store.js';
 import {
   disposeProjector,
