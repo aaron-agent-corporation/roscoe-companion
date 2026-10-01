@@ -89,7 +89,9 @@ describe('the room tool hand', () => {
 
       expect(entry.body.text).toBe('the migration is running, @bo');
       expect(entry.mentions).toEqual([bo]);
-      expect(store.listEntries(channel.id, { limit: 10 }).at(-1)?.id).toBe(entry.id);
+      const entries = store.listEntries(channel.id, { limit: 10 });
+      expect(entries.filter((row) => row.kind === 'post').at(-1)?.id).toBe(entry.id);
+      expect(entries.filter((row) => row.kind === 'notice')).toHaveLength(1);
     });
 
     it('lands in a direct message, because a reply is nobody’s message any more', () => {

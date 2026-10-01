@@ -25,7 +25,7 @@ const tasksListOutputSchema = {
 };
 
 /** The external-only additions for each `tasks_*` tool. */
-const TASKS_EXTERNAL_CONFIGS: ExternalToolConfigs = {
+export const TASKS_EXTERNAL_CONFIGS: ExternalToolConfigs = {
   tasks_list: { annotations: A.readOnlyLocal, outputSchema: tasksListOutputSchema },
   tasks_create: { annotations: A.mutateCreateLocal },
   tasks_update: { annotations: A.mutateUpdateLocal },

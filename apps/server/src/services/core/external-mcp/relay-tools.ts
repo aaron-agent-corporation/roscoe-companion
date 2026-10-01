@@ -26,7 +26,7 @@ import { registerFromDefinitions, type ExternalToolConfigs } from './register-fr
 const A = ToolAnnotationPresets;
 
 /** The external-only additions for each `relay_*` tool (13 total). */
-const RELAY_EXTERNAL_CONFIGS: ExternalToolConfigs = {
+export const RELAY_EXTERNAL_CONFIGS: ExternalToolConfigs = {
   relay_send: { annotations: A.mutateCreateLocal },
   // Not read-only: ack:true destroys the returned messages' payloads.
   relay_inbox: { annotations: A.mutateUpdateLocal },

@@ -196,6 +196,19 @@ export async function createAdapter(
         // The origin seeds no permission mode: an agent-to-agent DM carries
         // the grant it arrived under, and an absent grant is not consent
         // (DOR-604, DOR-2105).
+        // Codex/OpenCode authenticate their tool listener before emitting content.
+        // Give that launch canonical authority now, but never pin a failed first turn.
+        prepareSessionRuntime: async ({ sessionId, runtimeType, agentDirectory }) => {
+          const created = await runtimeRegistry.persistSessionRuntime(
+            sessionId,
+            runtimeType,
+            { kind: 'agent-dm' },
+            agentDirectory
+          );
+          return async () => {
+            if (created) await runtimeRegistry.forgetUnstartedSession(sessionId);
+          };
+        },
         bindSessionRuntime: async ({ sessionId, runtimeType, agentDirectory }) => {
           await runtimeRegistry.persistSessionRuntime(
             sessionId,

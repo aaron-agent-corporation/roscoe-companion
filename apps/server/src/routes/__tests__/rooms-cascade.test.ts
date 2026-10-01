@@ -208,6 +208,46 @@ describe('/api/rooms — what a headerless caller gets', () => {
     resetAgentIdentityService();
   });
 
+  it('bounds thirty authenticated outside-turn DM mentions even when the peer stays silent', async () => {
+    const created = await request(testServer)
+      .post('/api/rooms')
+      .send({
+        kind: 'dm',
+        title: 'Agent exchange',
+        agentPaths: ['/agents/ana', '/agents/bo'],
+      });
+    expect(created.status).toBe(201);
+    const roomId = created.body.id as string;
+    const token = await initAgentIdentityService(db).mint({
+      agentPath: ANA_PATH,
+      displayName: 'Ana',
+    });
+    for (let i = 0; i < 30; i++) {
+      const res = await request(testServer)
+        .post(`/api/rooms/${roomId}/entries`)
+        .set('X-DorkOS-Agent', token)
+        .send({ text: '@bo please review' });
+      expect(res.status).toBe(202);
+      await getRoomService().triggersIdle();
+    }
+    expect(runner.turns.length).toBeGreaterThan(0);
+    expect(runner.turns.length).toBeLessThanOrEqual(
+      USER_CONFIG_DEFAULTS.rooms.maxTurnsPerAgentPerCascade
+    );
+    const log = await entries(roomId);
+    const posts = log.filter((entry) => entry.kind === 'post');
+    expect(posts).toHaveLength(30);
+    expect(new Set(posts.map((entry) => entry.cascadeRoot)).size).toBe(1);
+    expect(
+      log.filter((entry) => entry.kind === 'post').every((entry) => entry.cascadeDepth > 0)
+    ).toBe(true);
+    expect(
+      log.filter(
+        (entry) => entry.kind === 'notice' && entry.body.text.startsWith('This post did not wake')
+      )
+    ).toHaveLength(1);
+  });
+
   it('stamps a headerless post as the local human, which is the whole exposure', async () => {
     const roomId = await loudRoom();
     await post(roomId, 'hello');

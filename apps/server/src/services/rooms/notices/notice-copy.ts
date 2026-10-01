@@ -39,6 +39,23 @@ export function buildCascadeNotice(agentName: string, subjectAuthorId: string): 
   };
 }
 
+/** Explain refused mentions without implying that an agent already took a turn. */
+export function buildOutsideTurnNotice(
+  subjectAuthorId: string,
+  reason: 'channel' | 'cold-start' | 'limit'
+): RoomEntryBody {
+  const explanation = {
+    channel: 'Posts made outside a room turn cannot start a conversation in a channel.',
+    'cold-start': 'The limit on new agent-started conversations has been reached.',
+    limit: 'This conversation has reached its automatic-reply limit.',
+  }[reason];
+  return {
+    text: `This post did not wake all the agents it mentioned. ${explanation} A person can mention them to continue.`,
+    notice: 'cascade_stopped',
+    subjectAuthorId,
+  };
+}
+
 /**
  * The durable `notice` the room writes when it runs out of hourly budget.
  *

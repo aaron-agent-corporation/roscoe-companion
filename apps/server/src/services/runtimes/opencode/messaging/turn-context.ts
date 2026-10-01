@@ -14,6 +14,7 @@
  *
  * @module services/runtimes/opencode/turn-context
  */
+import { buildMessagingToolsBlock } from '../../shared/messaging/tools-context.js';
 import { buildAgentContextAppend } from '../../shared/agent-context.js';
 import type { AgentHome } from '../../../core/agent-identity/index.js';
 import { buildRoomToolsBlock } from '../../shared/room-tools-context.js';
@@ -66,7 +67,10 @@ export async function buildOpenCodeTurnContext(
   // runtime listener hides the same area's tools from this turn's list.
   // Read at the ANCHORED agent (DOR-2091): a room worktree reads as its agent,
   // and a refused turn as nobody — never the directory's own agent.
-  const blocked = renderBlockedAreaLines((await resolveToolVisibilityFor(agentPath)).blockedAreas);
+  const { blockedAreas } = await resolveToolVisibilityFor(agentPath);
+  const blocked = renderBlockedAreaLines(blockedAreas);
   const withRooms = `${neutralContext}\n\n${buildRoomToolsBlock(OPENCODE_DORKOS_TOOL_PREFIX)}`;
-  return blocked ? `${withRooms}\n\n${blocked}` : withRooms;
+  return [withRooms, buildMessagingToolsBlock(OPENCODE_DORKOS_TOOL_PREFIX, blockedAreas), blocked]
+    .filter(Boolean)
+    .join('\n\n');
 }

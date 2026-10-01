@@ -56,6 +56,10 @@ type NoticeBuilder = Extract<keyof typeof copy, `build${string}Notice`>;
  * is added — and the first test below checks the same thing at run time.
  */
 const NOTICES: Record<NoticeBuilder, () => RoomEntryBody[]> = {
+  buildOutsideTurnNotice: () =>
+    (['channel', 'cold-start', 'limit'] as const).map((reason) =>
+      copy.buildOutsideTurnNotice('ana', reason)
+    ),
   buildCascadeNotice: () => [copy.buildCascadeNotice('Ana', 'author-ana')],
   buildBudgetNotice: () => [copy.buildBudgetNotice('room'), copy.buildBudgetNotice('global')],
   buildBusyNotice: () => [

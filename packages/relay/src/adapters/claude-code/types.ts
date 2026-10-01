@@ -148,15 +148,9 @@ export type TurnRuntimeTypeResolver = (turn: {
  * conversation that already has an owner is left exactly as it stood, so this
  * is safe to call on every turn and self-heals a turn whose write failed.
  *
- * **Called only once the turn has produced CONTENT** — words, thinking, a tool
- * call, a result, a picture — never merely once it has emitted events, because a
- * turn that only failed emits those too (a synthesized terminal `done`, an
- * `error` event standing in for a throw). The reason is the one
- * `room-turn-runner.ts` gives at its own call, sharpened by what a bad write
- * costs here: a row written for a turn that produced nothing is
- * indistinguishable afterwards from a real binding, and because an
- * agent-to-agent conversation is keyed by the agent id alone and this write is
- * first-write-wins, that row is permanent.
+ * Called after content exists. First-turn tool authority is established earlier
+ * by SessionRuntimePreparer and removed again if the turn never produces content.
+ * A turn that speaks and then fails retains ownership of its transcript.
  *
  * Tolerant by contract, exactly as the resolver is: a rejection is logged and
  * the turn stands. This is bookkeeping about a turn that has already happened —
@@ -177,6 +171,14 @@ export type SessionRuntimeBinder = (binding: {
   runtimeType: string;
   agentDirectory?: string;
 }) => Promise<void>;
+
+/**
+ * Establish first-turn authority before tools open. Returns a cleanup that removes
+ * only a row created by this launch; call it if no content ran or the runtime rekeys.
+ */
+export type SessionRuntimePreparer = (
+  binding: Parameters<SessionRuntimeBinder>[0]
+) => Promise<() => Promise<void>>;
 
 /**
  * Minimal interface for agent session management.
@@ -414,6 +416,8 @@ export interface ClaudeCodeAdapterDeps {
    * nothing to consult, which is what every host did before DOR-1774.
    */
   bindSessionRuntime?: SessionRuntimeBinder;
+  /** Temporary authority needed before a first runtime turn can open its tools. */
+  prepareSessionRuntime?: SessionRuntimePreparer;
   /**
    * Whether a click on a chat platform may authorize one session's tool call.
    *

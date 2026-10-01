@@ -164,6 +164,12 @@ export function evaluateCascade(
  * already spent: its own id, stamped AT the ceiling. The entry is durable and
  * readable like any other, and anything it would address is refused by the
  * depth rule — visibly, with a notice — instead of silently costing a turn.
+ * The DM writer has one bounded exception: under the entry transaction it
+ * joins the recent cascade at its highest depth, or spends one of three cold
+ * starts per author/room/hour at depth one. Channels retain this ceiling stamp.
+ * Refused outside-turn mentions produce one notice per author/room/hour;
+ * ordinary unaddressed posts remain quiet. Outside-turn DM posts also spend
+ * the posting author's repeat allowance, bounding wakes of a silent peer.
  * An agent that genuinely is mid-turn passes its `trigger` and is unaffected.
  *
  * @param entryId - The id of the entry being written.

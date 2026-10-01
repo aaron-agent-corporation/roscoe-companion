@@ -645,34 +645,24 @@ describe('a room says why an agent did not answer', () => {
   });
 
   describe('when the message came from an agent posting outside a turn', () => {
-    it('stays silent, on purpose, and this test is the reason why', async () => {
-      // This silence is NOT a gap, and it looks exactly like one: DOR-621
-      // nearly closed it while closing the three that ARE gaps.
-      //
-      // `deriveCascade` stamps an un-provenanced agent post AT the ceiling, so
-      // every room-mate is refused on depth, at every configured
-      // `maxAgentDepth`, on every such post. A notice here would be written once
-      // per post per room-mate and could not be damped: the
-      // `(room, cascade, author)` key never repeats, because each of these posts
-      // is its own cascade root. The measured shape was five posts times every
-      // room-mate. Closing it needs a damping key that repeats — keyed on the
-      // room and the quiet agent, re-armed the way the budget notice re-arms —
-      // which is a design, not a one-liner. The full reasoning sits beside the
-      // branch in `room-trigger.ts`.
-      //
-      // The mentioned post is in this list deliberately: a mention does not
-      // change the arithmetic, so it does not change the answer either.
+    it('keeps ordinary posts quiet and explains an outside-turn mention once', async () => {
       open(
         outcomeRunner(() => ({ text: 'on it' })),
         ['/agents/ana', '/agents/bo']
       );
-      for (const text of ['deploying now', 'deploy is green', 'hey @bo take a look']) {
+      for (const text of ['deploying now', 'deploy is green']) {
         service.post(room.id, { authorId: ana, text });
       }
       await service.triggersIdle();
 
       expect(runner.turns).toHaveLength(0);
       expect(notices()).toHaveLength(0);
+      service.post(room.id, { authorId: ana, text: 'hey @bo take a look' });
+      service.post(room.id, { authorId: ana, text: 'again @bo' });
+      await service.triggersIdle();
+      expect(runner.turns).toHaveLength(0);
+      expect(notices()).toHaveLength(1);
+      expect(notices()[0].body.text).toContain('outside a room turn');
     });
 
     it('still speaks when a long chain hits the reply ceiling', async () => {

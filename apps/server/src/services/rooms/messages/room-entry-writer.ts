@@ -102,6 +102,7 @@ export class RoomEntryWriter {
   private readonly triggers: RoomTriggerDispatcher;
   /** What bounds automatic replies in one room. Read per write. */
   private readonly limitsFor: RoomLimitsResolver;
+  private readonly engagedWindow: RoomCore['engagedWindow'];
   private readonly mirrorWrites: RoomMirrorWritePolicy | undefined;
 
   constructor(
@@ -115,6 +116,7 @@ export class RoomEntryWriter {
     this.bridges = core.bridges;
     this.triggers = core.triggers;
     this.limitsFor = core.limitsFor;
+    this.engagedWindow = core.engagedWindow;
     this.mirrorWrites = core.mirrorWrites;
   }
 
@@ -240,8 +242,8 @@ export class RoomEntryWriter {
     // who is writing decides, never the shape of the call. An agent can post
     // here directly (`POST /api/rooms/:id/entries` carries no trigger), both
     // while its turn runs and from a shell with nothing in flight at all;
-    // `deriveCascade` refuses a fresh cascade to either. Only a human resets the
-    // count, which is what spec §6 says and what the setting's own docs promise.
+    // Channels keep the spent stamp. DMs join a recent conversation or use
+    // the durable cold-start allowance, resolved under the entry write lock.
     const author = this.authors.getById(input.authorId);
     const trigger = input.trigger ?? this.triggers.activeTurnFor(input.authorId);
 
@@ -344,7 +346,19 @@ export class RoomEntryWriter {
         createdAt: new Date().toISOString(),
       },
       transactional,
-      bindTransactional
+      bindTransactional,
+      room.kind === 'dm' && author?.kind === 'agent' && !trigger && !mirrorWrite
+        ? () =>
+            this.store.deriveAgentDmCascade({
+              roomId,
+              authorId: input.authorId,
+              entryId: id,
+              maxAgentDepth: this.limitsFor(roomId).maxAgentDepth,
+              maxTurnsPerAgentPerCascade: this.limitsFor(roomId).maxTurnsPerAgentPerCascade,
+              engagedMinutes: this.engagedWindow().minutes,
+              now: Date.now(),
+            })
+        : undefined
     );
 
     this.publisher.publishEntry(entry, opts?.attachments ?? []);

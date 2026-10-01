@@ -15,6 +15,7 @@ export type {
   TurnDeskCheck,
   TurnRuntimeTypeResolver,
   SessionRuntimeBinder,
+  SessionRuntimePreparer,
   TurnExecutionSettings,
 } from './types.js';
 export type { ApprovalAuthorizer } from './approval-handler.js';

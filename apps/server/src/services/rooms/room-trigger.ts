@@ -210,7 +210,7 @@ import {
   type RoomNoticeWriter,
   type RoomTurnUnanswered,
 } from './notices/notice-log.js';
-import { buildCascadeNotice, type BusyContext } from './notices/notice-copy.js';
+import { buildCascadeNotice } from './notices/notice-copy.js';
 import type { RoomAgentLookup } from './room-errors.js';
 import {
   RoomTurnRuntimeGoneError,
@@ -1036,72 +1036,11 @@ export class RoomTriggerDispatcher {
           ? evaluateCascade(authorId, provenance, limits)
           : { allowed: true, depth: entry.cascadeDepth + 1 };
       if (!decision.allowed) {
-        // Only announce a limit something actually hit. A `depth` refusal
-        // against an entry that is its OWN cascade root did not come from a
-        // back-and-forth — it comes from the ceiling `deriveCascade` synthesizes
-        // for an agent posting with no turn behind it. Announcing it said "Bo
-        // stopped replying here. This back-and-forth hit its automatic-reply
-        // limit" when Bo was never triggered, no exchange happened, and the
-        // suggested remedy does nothing. Five ordinary posts by one agent
-        // produced five such lines, one per room-mate, and the dedupe never
-        // engaged because each post is its own root.
-        //
-        // THIS SILENCE IS DELIBERATE, and it survived a second look during
-        // DOR-621 — which added notices to every other quiet path in this file.
-        // It reads like a hole in "a refusal is visible" and it is not, for
-        // three reasons worth having in front of you before you close it:
-        //
-        //   1. `deriveCascade` stamps such a post AT the ceiling
-        //      (`cascade-guard.ts`), not at depth 0. So this refusal fires at
-        //      EVERY `maxAgentDepth`, for every room-mate, on every post an
-        //      agent makes outside a turn. Copy that offers to raise a limit is
-        //      inert here: no limit was reached, and raising it changes nothing.
-        //   2. The `(room, cascade, agent)` damping key CANNOT repeat here,
-        //      because each such post is its own cascade root. Whatever notice
-        //      you add is written once per post per room-mate, forever. Closing
-        //      this needs a key that repeats — keyed on the room and the quiet
-        //      agent, re-armed the way `noticedBudget` re-arms — not this one.
-        //   3. A test pinned at `maxAgentDepth: 0` passes while the spraying
-        //      case is broken, because 0 is the one value that makes the shape
-        //      look sane. Any test here must use a realistic ceiling.
-        //
-        // The invariant is served differently: nothing was ever triggered, so
-        // there is no agent that went quiet on you. `room-silence.test.ts` pins
-        // BOTH sides of that narrowness — the silence here, and the two real
-        // refusals that must still speak (a repeat stop, and a chain that
-        // reaches the depth ceiling), so this cannot be widened into a spray or
-        // narrowed into a general hush without something going red.
-        //
-        // On the two terms below: `fromRealChain` is the load-bearing one, and
-        // the `repeat` term is a guard rather than a discriminator. Every
-        // reachable repeat refusal ALSO has `fromRealChain` true, because a
-        // cascade whose root is this entry contains only this entry (plus
-        // system notices), so the target's count in it is zero. Kept because
-        // that is a property of `deriveCascade` in another module, not of
-        // anything here, and it costs one comparison to not depend on it.
-        //
-        // **An agent the room already knows is GONE is left to `reportGone`,
-        // both here and on the wire.** It reads like a missing branch and it is
-        // the opposite: this member was named by a message and its directory no
-        // longer holds it, so `agent_gone` is about to be written — with the
-        // remedy, which is to register it again. Adding "this back-and-forth hit
-        // its automatic-reply limit" beside that is two lines about one member
-        // for one message, and the second one is advice that does nothing. The
-        // same reasoning decides the wire: `skipped` reports it once, as `gone`,
-        // which is both the deeper fact (an agent that is not there cannot
-        // answer whatever the guard thought) and the one the log agrees with.
-        //
-        // It is also what keeps `refused` and `gone` DISJOINT, which is the
-        // invariant the two `continue`s below rest on: a guard-refused author
-        // never reaches the liveness check, and a liveness-failed author was
-        // never guard-refused.
+        // Gone agents get their own remedy. Other refusals are announced below;
+        // outside-turn mentions share a room/author/hour notice rather than a
+        // fresh notice for each root and each selected member.
         if (gone.has(authorId)) continue;
         this.announceCascade(room, entry, authorId, record?.displayName, decision.reason);
-        // Reported to the POSTER even in the one case the room stays quiet
-        // about. The three reasons for that silence are all reasons not to write
-        // a durable line at every room-mate; none of them is a reason to leave
-        // the writer itself guessing about why its own message went unanswered,
-        // and this answer is private, unduplicated and impossible to spray.
         refused.push({ authorId, reason: decision.reason });
         continue;
       }
@@ -1142,15 +1081,8 @@ export class RoomTriggerDispatcher {
   }
 
   /**
-   * Say that the guard stopped an agent — unless announcing it would describe an
-   * exchange that never happened.
-   *
-   * The whole of that exception is in the comment block at the call site in
-   * {@link RoomTriggerDispatcher.selectCandidates}: a `depth` refusal against an
-   * entry that is its OWN cascade root comes from the ceiling `deriveCascade`
-   * synthesizes for an agent posting with no turn behind it, so nothing was
-   * triggered, no limit was reached, and the notice would spray one line per
-   * room-mate per post with no damping key that can ever repeat.
+   * Explain a refused trigger. Outside-turn mentions use a separate damping key
+   * because those posts may each carry a new, already-spent root.
    *
    * @param room - The room the message landed in.
    * @param entry - The message the refusal is about.
@@ -1165,13 +1097,14 @@ export class RoomTriggerDispatcher {
     displayName: string | undefined,
     reason: CascadeRefusalReason
   ): void {
-    // On the two terms: `fromRealChain` is the load-bearing one, and the
-    // `repeat` term is a guard rather than a discriminator. Every reachable
-    // repeat refusal ALSO has `fromRealChain` true, because a cascade whose
-    // root is this entry contains only this entry (plus system notices), so the
-    // target's count in it is zero. Kept because that is a property of
-    // `deriveCascade` in another module, not of anything here, and it costs one
-    // comparison to not depend on it.
+    if (
+      (room.kind === 'dm' || entry.cascadeRoot === entry.id) &&
+      this.deps.store.isOutsideTurnAgentPost(room.id, entry.id)
+    ) {
+      if (entry.mentions.includes(authorId))
+        this.notices.announceOutsideTurn(room, entry, authorId);
+      return;
+    }
     const fromRealChain = entry.cascadeRoot !== entry.id;
     if (reason !== 'repeat' && !fromRealChain) return;
     this.notices.announce(

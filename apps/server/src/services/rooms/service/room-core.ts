@@ -75,6 +75,8 @@ export interface RoomCore {
    * Settings or on the room takes effect on the very next message.
    */
   readonly limitsFor: RoomLimitsResolver;
+  /** Live conversation window used by agent posts outside a DM turn. */
+  readonly engagedWindow: RoomServiceDeps['engagedWindow'];
   /** The live `uploads.maxFiles`. Read per post, so a change takes effect. */
   readonly maxAttachmentsPerEntry: () => number;
   readonly maxPostsPerTurn: () => number;
@@ -264,6 +266,7 @@ export function createRoomCore(deps: RoomServiceDeps, writeBack: RoomWriteBack):
     broadcaster: deps.broadcaster,
     roster,
     triggers,
+    engagedWindow: deps.engagedWindow,
     limitsFor: deps.limitsFor,
     maxAttachmentsPerEntry: deps.maxAttachmentsPerEntry,
     maxPostsPerTurn: deps.maxPostsPerTurn,

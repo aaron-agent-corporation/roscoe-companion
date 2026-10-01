@@ -10,6 +10,7 @@
  *
  * @module server/services/rooms/room-store
  */
+import { deriveAgentDmCascade, type AgentDmCascadeInput } from './messages/agent-dm-cascade.js';
 import {
   DEFAULT_AMBIENT_MAX_ENTRIES,
   authors,
@@ -1053,16 +1054,19 @@ export class RoomStore {
    * reads by `timeline_band`/`timeline_pos` instead, which place remote history
    * before any post written here.
    *
+   * @param derive - Optional cascade resolver, read under the same write lock as the insert.
    * @returns The stored entry, with its allocated local `seq`.
    */
   appendEntry(
     entry: NewRoomEntry,
     within?: (tx: DbTransaction) => void,
-    bind?: (tx: DbTransaction, seq: number) => void
+    bind?: (tx: DbTransaction, seq: number) => void,
+    derive?: () => Pick<NewRoomEntry, 'cascadeRoot' | 'cascadeDepth'>
   ): RoomEntry {
     return this.db.transaction(
       (tx) => {
         within?.(tx);
+        if (derive) entry = { ...entry, ...derive() };
         const allocated = tx
           .select({ next: sql<number>`COALESCE(MAX(${roomEntries.seq}), 0) + 1` })
           .from(roomEntries)
@@ -2045,6 +2049,33 @@ export class RoomStore {
         .orderBy(desc(lastActivityAt), desc(root.id))
         .limit(limit)
         .all()
+    );
+  }
+
+  /** Resolve the DM stamp under appendEntry's write lock. */
+  deriveAgentDmCascade(
+    input: AgentDmCascadeInput
+  ): Pick<NewRoomEntry, 'cascadeRoot' | 'cascadeDepth'> {
+    return deriveAgentDmCascade(this.db, input);
+  }
+
+  /** Whether an agent post was written without a room dispatch behind it. */
+  isOutsideTurnAgentPost(roomId: string, entryId: string): boolean {
+    return (
+      this.db
+        .select({ id: roomEntries.id })
+        .from(roomEntries)
+        .innerJoin(authors, eq(authors.id, roomEntries.authorId))
+        .where(
+          and(
+            eq(roomEntries.roomId, roomId),
+            eq(roomEntries.id, entryId),
+            eq(roomEntries.kind, 'post'),
+            eq(authors.kind, 'agent'),
+            isNull(roomEntries.dispatchId)
+          )
+        )
+        .get() !== undefined
     );
   }
 

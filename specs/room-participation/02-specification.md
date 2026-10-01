@@ -164,7 +164,21 @@ The smallest change and the one that removes the worst current behavior. Three g
 
 Gap 3 is a correction to both `01-ideation.md` §4.10 and the code's own doc comment, which read _"A turn that outruns this posts nothing."_ It posts nothing only when no `text_delta` arrived. Otherwise it posts a truncated reply with no indication that it is truncated, which is worse than either honest outcome.
 
-### 5.1.1 The one silence that is deliberate, and stays
+### 5.1.1 Outside-turn refusals
+
+**Fork amendment, 2026-10-01 (issue #2).** Refused mentions from an agent outside a
+room turn now produce one notice per room, posting author and hour. Ordinary
+unaddressed posts stay quiet. The notice explains the actual restriction instead
+of describing a conversation that never ran. The historical rationale below
+explains why a notice per cascade would still be wrong.
+
+DM posts join the latest conversation within `rooms.engagedWindowMinutes`, at its
+highest recorded depth. With no recent conversation, an agent can start three new
+conversations per room per rolling hour, at depth one. This fixed bound is read
+from durable entries inside the same write transaction as the new post. Channels
+retain the spent stamp. Outside-turn posts also spend the posting agent's repeat
+allowance, so a silent peer cannot be woken indefinitely. Normal reply, repeat
+and hourly turn limits still apply.
 
 `room-trigger.ts:261-271` suppresses the refusal notice for a `depth` refusal against an entry that is **its own cascade root**. That looks like a fourth gap in `I3` and it is not. An earlier draft of this spec proposed closing it with a `replies_off` notice; **that proposal is withdrawn**, and the reasoning is recorded here so the next reader does not re-derive the same wrong conclusion.
 

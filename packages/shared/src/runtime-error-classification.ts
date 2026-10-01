@@ -194,6 +194,16 @@ export function describeCodexDiagnostic(message: string): string | null {
   );
   if (modelSwitch) return `Resumed with ${modelSwitch[2]} instead of ${modelSwitch[1]}.`;
 
+  // Codex emits this informational skills-budget notice as an error item even
+  // on completed turns. Keep it visible without failing a successful Relay reply.
+  if (
+    /^Skill descriptions were shortened to fit the skills context budget\. Codex can still see every skill, but some descriptions are shorter\./.test(
+      message
+    )
+  ) {
+    return 'Skill descriptions were shortened. All skills are still available.';
+  }
+
   if (/^Falling back from WebSockets to HTTPS\b/i.test(message)) {
     return 'Codex switched to a standard connection.';
   }

@@ -654,13 +654,16 @@ const _rawServerIsNotARegistrar: McpServer extends ToolRegistrar ? never : true 
  *   identity token. This server is rebuilt per request, so one identity covers
  *   every tool it registers.
  * @param hiddenToolNames - Tools this caller is not shown.
+ * @param requestingSession - Verified runtime session to receive approval verdicts.
+ *   Omitted for the sessionless external server.
  * @returns A registrar to hand to the per-domain registration functions, and the
  *   reach the request tool is handed.
  */
 export function gatedToolRegistrar(
   server: McpServer,
   identity?: AgentIdentity,
-  hiddenToolNames: ReadonlySet<string> = new Set()
+  hiddenToolNames: ReadonlySet<string> = new Set(),
+  requestingSession?: ApprovalRequestingSession
 ): ToolRegistrar & { readonly reach: HandToolReach } {
   const built: SdkMcpTool[] = [];
   const registerTool: ToolRegistrar['registerTool'] = ((
@@ -681,16 +684,15 @@ export function gatedToolRegistrar(
       name,
       { ...config, inputSchema: gatedInputSchema(action, config.inputSchema ?? {}) },
       (async (args: never, extra: unknown): Promise<CallToolResult> => {
-        // `interactive: false` — the external `/mcp` server is sessionless, so
-        // the UI tools are not registered and must not be suggested.
         const outcome = await runGate({
           action,
           args,
           ...(identity ? { identity } : {}),
-          // `interactive: false` — the external `/mcp` server is sessionless, so
-          // the UI tools are not registered and must not be suggested.
+          // HTTP calls do not hold for approval. Runtime calls record a verdict
+          // address so approval can wake their session after the turn ends.
           interactive: false,
-          origin: 'external-mcp',
+          origin: requestingSession ? 'session' : 'external-mcp',
+          ...(requestingSession ? { requestingSession } : {}),
         });
         if (!outcome.allowed) return outcome.result;
         return cb(outcome.input as never, extra);
@@ -705,6 +707,10 @@ export function gatedToolRegistrar(
   // runtime value and writing `[GATED]: true` here would throw. The assertion is
   // the whole mechanism, and this factory is the one place entitled to make it,
   // because it is the one place that ran the gate.
-  const reach = createHandToolReach(built, { interactive: false, origin: 'external-mcp' });
+  const reach = createHandToolReach(built, {
+    interactive: false,
+    origin: requestingSession ? 'session' : 'external-mcp',
+    ...(requestingSession ? { resolveRequestingSession: () => requestingSession } : {}),
+  });
   return { registerTool, reach } as unknown as ToolRegistrar & { readonly reach: HandToolReach };
 }
