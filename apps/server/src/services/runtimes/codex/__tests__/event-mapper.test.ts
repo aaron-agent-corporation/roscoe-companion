@@ -503,6 +503,10 @@ describe('mapCodexEvent', () => {
 
     it.each([
       [METADATA_WARNING, 'Using fallback settings for gpt-6-astra.'],
+      [
+        'Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.',
+        'Skill descriptions were shortened. All skills are still available.',
+      ],
       [MODEL_SWITCH_WARNING, 'Resumed with gpt-5.4 instead of gpt-6-astra.'],
       [
         'Falling back from WebSockets to HTTPS. stream disconnected before completion',
@@ -629,18 +633,24 @@ describe('mapCodexEvent', () => {
       expect(events[1]!.data).toMatchObject({ message: 'connection lost', code: 'turn_failed' });
     });
 
-    it('does not let a preceding diagnostic dedupe away a terminal failure with the same text', () => {
-      const ctx = makeContext();
-      mapCodexEvent(codexItemCompleted(errorThreadItem('diagnostic', METADATA_WARNING)), ctx);
+    it.each([
+      METADATA_WARNING,
+      'Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter.',
+    ])(
+      'does not let a preceding diagnostic dedupe away a terminal failure with the same text',
+      (message) => {
+        const ctx = makeContext();
+        mapCodexEvent(codexItemCompleted(errorThreadItem('diagnostic', message)), ctx);
 
-      const events = mapCodexEvent(codexTurnFailed(METADATA_WARNING), ctx);
-      expect(events.map((event) => event.type)).toEqual(['session_status', 'error', 'done']);
-      expect(events[1]!.data).toMatchObject({
-        message: METADATA_WARNING,
-        code: 'turn_failed',
-        category: 'execution_error',
-      });
-    });
+        const events = mapCodexEvent(codexTurnFailed(message), ctx);
+        expect(events.map((event) => event.type)).toEqual(['session_status', 'error', 'done']);
+        expect(events[1]!.data).toMatchObject({
+          message,
+          code: 'turn_failed',
+          category: 'execution_error',
+        });
+      }
+    );
 
     it('maps a nested model/version rejection to actionable copy with raw details', () => {
       const events = mapCodexEvent(codexTurnFailed(CODEX_UPDATE_ERROR), makeContext());

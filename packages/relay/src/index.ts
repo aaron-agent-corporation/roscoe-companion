@@ -183,6 +183,7 @@ export type {
   TurnDeskCheck,
   TurnRuntimeTypeResolver,
   SessionRuntimeBinder,
+  SessionRuntimePreparer,
   TurnExecutionSettings,
 } from './adapters/claude-code/index.js';
 

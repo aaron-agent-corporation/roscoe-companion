@@ -1964,13 +1964,7 @@ describe('what an armed agent can spend by making rooms', () => {
     ]);
   });
 
-  it('triggers nobody when the same sequence runs with no turn in flight', async () => {
-    // The identical three calls, from a shell. `deriveCascade` refuses a fresh
-    // cascade to an un-provenanced agent post and stamps it AT the ceiling, so
-    // the mention costs nothing and — unlike every other cascade refusal — says
-    // nothing either. The discrimination is the point: this row and the one
-    // above differ only in whether a turn was in flight, and they measure
-    // opposite outcomes.
+  it('refuses a channel mention outside a turn and explains the refusal', async () => {
     const runner = scriptedRunner(() => null);
     const install = open({ runner });
     const room = (await install.call('rooms.create', {
@@ -1990,17 +1984,11 @@ describe('what an armed agent can spend by making rooms', () => {
     await install.service.triggersIdle();
 
     expect(runner.turns).toEqual([]);
-    // And SILENTLY, which is the deliberate half. Every other cascade refusal
-    // writes the room's own-voice notice; this one must not, because the entry
-    // is its own cascade root and the refusal fires against every room-mate at
-    // every ceiling — a notice here sprayed one line per member per post, and
-    // offered to raise a limit nothing had reached (`room-trigger.ts`, the
-    // DOR-621 note; `room-silence.test.ts` pins both sides of that narrowness).
     expect(
       install.service
         .listEntries(room.roomId, install.human, { limit: 50 })
         .map((entry) => entry.kind)
-    ).toEqual(['post']);
+    ).toEqual(['post', 'notice']);
   });
 
   it('does not buy one room-worth of turns per room it opens', async () => {

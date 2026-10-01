@@ -43,7 +43,7 @@ const meshListOutputSchema = {
 };
 
 /** The external-only additions for each `mesh_*` tool. */
-const MESH_EXTERNAL_CONFIGS: ExternalToolConfigs = {
+export const MESH_EXTERNAL_CONFIGS: ExternalToolConfigs = {
   // Auto-imports any `.dork/agent.json` found during the walk, upserting the
   // registry as a scan side effect — not a pure read.
   mesh_discover: { annotations: A.mutateUpdateLocal },

@@ -5457,7 +5457,8 @@ async function start() {
           capabilityRegistry!,
           principal,
           identity,
-          visibility.hiddenToolNames
+          visibility.hiddenToolNames,
+          mcpToolDeps
         );
       },
     });

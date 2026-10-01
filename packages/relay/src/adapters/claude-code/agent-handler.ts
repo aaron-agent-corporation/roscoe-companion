@@ -31,6 +31,7 @@ import type {
   AgentSessionStoreLike,
   ExecutionSettingsResolver,
   SessionRuntimeBinder,
+  SessionRuntimePreparer,
   TurnDeskCheck,
   TurnExecutionSettings,
 } from './types.js';
@@ -97,6 +98,8 @@ export interface AgentHandlerDeps {
    * session the cockpit binds.
    */
   bindSessionRuntime?: SessionRuntimeBinder;
+  /** Establish tool authority at launch, with cleanup for a turn that never starts. */
+  prepareSessionRuntime?: SessionRuntimePreparer;
   /**
    * Where this turn records the envelope it is answering, so the agent's own
    * `relay_send*` calls continue that budget instead of minting a fresh one
@@ -575,23 +578,6 @@ export async function handleAgentMessage(
     : deps.inboundBudgets?.bind(ccaSessionKey, envelope.budget);
 
   const isInboxReplyTo = envelope.replyTo?.startsWith('relay.inbox.');
-  const eventStream = stoppedBeforeStart
-    ? NO_EVENTS
-    : deps.agentManager.sendMessage(ccaSessionKey, prompt, {
-        permissionMode: effectivePermissionMode,
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        ...(payloadForAgent ? { forAgent: payloadForAgent } : {}),
-        ...(formatBlock ? { systemPromptAppend: formatBlock } : {}),
-        // Sent again, for the same reason the permission mode and the cwd are:
-        // the runtime contract resolves a turn as per-send override → persisted
-        // → its own default, and a runtime whose sessions are not held in
-        // memory sees this call and not the one above.
-        ...executionSettings,
-        // A message started this turn, not a person watching the app, so an
-        // approval card is answered from the inbox and the verdict wakes the
-        // session; the turn does not hold for it (spec `agent-permissions` D6).
-        unattendedApprovals: true,
-      });
 
   let eventCount = 0,
     contentEventCount = 0,
@@ -608,7 +594,41 @@ export async function handleAgentMessage(
   // ANSWER the caller reads, which is the `agent_result` below (DOR-1337 / F6).
   let inStreamError: string | undefined;
 
+  let forgetLaunchAuthority: (() => Promise<void>) | undefined;
+  const forgetLaunchRow = async () => {
+    const forget = forgetLaunchAuthority;
+    forgetLaunchAuthority = undefined;
+    try {
+      await forget?.();
+    } catch (err) {
+      log.warn('[CCA] could not remove temporary session authority', describeError(err));
+    }
+  };
   try {
+    if (!controller.signal.aborted && deps.prepareSessionRuntime) {
+      forgetLaunchAuthority = await deps.prepareSessionRuntime({
+        sessionId: ccaSessionKey,
+        runtimeType: deps.runtimeType ?? deps.agentManager.type ?? 'claude-code',
+        ...(agentManifestDir ? { agentDirectory: agentManifestDir } : {}),
+      });
+    }
+    const eventStream = controller.signal.aborted
+      ? NO_EVENTS
+      : deps.agentManager.sendMessage(ccaSessionKey, prompt, {
+          permissionMode: effectivePermissionMode,
+          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          ...(payloadForAgent ? { forAgent: payloadForAgent } : {}),
+          ...(formatBlock ? { systemPromptAppend: formatBlock } : {}),
+          // Sent again, for the same reason the permission mode and the cwd are:
+          // the runtime contract resolves a turn as per-send override → persisted
+          // → its own default, and a runtime whose sessions are not held in
+          // memory sees this call and not the one above.
+          ...executionSettings,
+          // A message started this turn, not a person watching the app, so an
+          // approval card is answered from the inbox and the verdict wakes the
+          // session; the turn does not hold for it (spec `agent-permissions` D6).
+          unattendedApprovals: true,
+        });
     for await (const event of eventStream) {
       if (controller.signal.aborted) break;
       eventCount++;
@@ -679,6 +699,7 @@ export async function handleAgentMessage(
       error: streamError,
     });
   } finally {
+    if (contentEventCount === 0) await forgetLaunchRow();
     if (timeout) clearTimeout(timeout);
     // Released when the QUERY is over, which is not the same instant the
     // iteration stops (DOR-791).
@@ -789,37 +810,12 @@ export async function handleAgentMessage(
     }
   }
 
-  // **Which runtime owns this conversation, recorded once the turn is known to
-  // have STARTED** (DOR-1774). Without it the manifest is re-read every turn and
-  // an edit made mid-conversation hands the remaining turns to a program that
-  // has no transcript for the key it is given — the DOR-764 shape, on the one
-  // subject family that had no memory of its own.
-  //
-  // Three things about the timing, all of them load-bearing, and each mirroring
-  // the same call in `room-turn-runner.ts`:
-  //
-  // - **Only for a turn that produced CONTENT** — words, thinking, a tool call,
-  //   a result, a picture ({@link isTurnContentEvent}) — never merely one that
-  //   emitted events. That distinction is the whole guard, because "emitted
-  //   events" is nearly free: claude-code synthesizes a terminal `done` when the
-  //   model produced none, a pre-stream credential failure arrives as an `error`
-  //   event rather than a throw, and the empty-stream guard turns a zero-content
-  //   turn into a yielded error. A first turn that only said "not signed in"
-  //   would therefore bind — and since an agent-to-agent DM keys its
-  //   conversation by the agent id alone, and `persistSessionRuntime` is
-  //   first-write-wins, that binding is PERMANENT: there is no next conversation
-  //   to correct it on and no UI over the row. Fixing the manifest afterwards
-  //   would change nothing. Content is the honest evidence that a transcript now
-  //   exists for somebody to be bound to.
-  // - **Not only for a turn that SUCCEEDED.** A turn that spoke and then crashed
-  //   or ran out of time still wrote that transcript, so its owner is a fact
-  //   whatever the ending was. Gating on success would leave the very
-  //   conversation most likely to be resumed unbound.
-  // - **Below everything that publishes, and its failure is LOGGED rather than
-  //   thrown.** This is bookkeeping about a turn whose answer has already gone
-  //   out. A `SQLITE_BUSY` here must not turn an answered turn into a failed
-  //   delivery — what is lost is one attribution row, which the next turn on
-  //   this conversation writes again.
+  // Keep durable ownership only after content exists. prepareSessionRuntime gave
+  // the first turn authority to open its tools; the finally block removed that
+  // launch row if the runtime never produced content. A turn that spoke before
+  // failing still owns its transcript. When Claude rekeys, bind the SDK id first
+  // and then remove only the temporary row this launch created.
+  // This bookkeeping must not turn an already-published answer into a failure.
   if (deps.bindSessionRuntime && contentEventCount > 0) {
     try {
       await deps.bindSessionRuntime({
@@ -827,6 +823,7 @@ export async function handleAgentMessage(
         runtimeType: deps.runtimeType ?? deps.agentManager.type ?? 'claude-code',
         ...(agentManifestDir ? { agentDirectory: agentManifestDir } : {}),
       });
+      if (durableSessionKey !== ccaSessionKey) await forgetLaunchRow();
     } catch (err) {
       // The session id rides as an argument, never inside the format string: it
       // is a runtime-minted value, and a `%s` in it would be read as a directive.

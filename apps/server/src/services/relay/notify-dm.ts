@@ -27,16 +27,11 @@
  * so it is written under the agent's own author id and reads like every other
  * message it sends.
  *
- * **It does not reset a reply budget.** The post carries no `trigger`, so
- * `deriveCascade` stamps it — like any other un-provenanced agent post — at the
- * cascade ceiling. The entry is durable and readable; anything it happened to
- * address would be refused by the depth rule rather than silently spending a
- * turn. That is exactly the property a notification wants: it informs the
- * person, and it cannot start a conversation between agents. (An agent that IS
- * mid-turn inherits that turn's cascade through `activeTurnFor`, which bounds it
- * under the same budget the turn is already spending — also correct.) In a 1:1
- * DM the point is close to moot: the only other member is a person, and people
- * are never dispatched to.
+ * **It uses the room's reply limits.** Without a live turn, the post joins a
+ * recent DM conversation or spends the bounded cold-start allowance. During a
+ * room turn it inherits that turn's cascade through `activeTurnFor`. This DM
+ * contains only the sending agent and the operator, so there is no other agent
+ * to wake and people are never dispatched to.
  *
  * **It never throws.** Every failure — an agent the mesh cannot place, a mesh
  * read that throws under a concurrent write, a room that refuses — is caught,

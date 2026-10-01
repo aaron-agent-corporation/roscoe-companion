@@ -82,7 +82,7 @@ describe('deliverNotifyDm', () => {
   });
 
   it('inherits the cascade of a turn the agent is already running', async () => {
-    // The other half of the cascade rule, and the one the ceiling test cannot
+    // The other half of the cascade rule, and the one the cold-start test cannot
     // see: an agent that notifies from INSIDE a turn is not un-provenanced, so
     // `writePost` picks up its live claim through `activeTurnFor` and the
     // notification is bounded by the budget that turn is already spending —
@@ -137,21 +137,20 @@ describe('deliverNotifyDm', () => {
     });
   });
 
-  it('spends the cascade at the ceiling when no turn is behind it, so the notification cannot start a conversation', () => {
+  it('uses the bounded DM start without waking anyone in the agent and operator DM', async () => {
     const { harness, deps } = setup();
 
     const outcome = deliverNotifyDm({ agentId: ANA_ID, message: 'Deploy finished.' }, deps);
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
 
-    // `deriveCascade` stamps an agent post with no turn behind it at the
-    // ceiling: durable and readable, and anything downstream of it is refused
-    // by the depth rule rather than silently costing a model turn. Pinned here
-    // because it is the property that makes a notification safe to send from a
-    // path no person triggered.
+    // DM posts use the bounded cold-start allowance. This notification still
+    // wakes nobody: the only other member is the person, and self-wakes are refused.
+    await harness.service.triggersIdle();
     const [entry] = harness.service.listEntries(outcome.roomId, harness.human, { limit: 10 });
-    expect(entry!.cascadeDepth).toBe(CEILING);
+    expect(entry!.cascadeDepth).toBe(1);
     expect(entry!.cascadeRoot).toBe(entry!.id);
+    expect(harness.runner.turns).toHaveLength(0);
   });
 
   it('reuses the direct message the operator already has with that agent', () => {

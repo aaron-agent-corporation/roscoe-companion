@@ -31,6 +31,7 @@ import type { RelayEnvelope } from '@dorkos/shared/relay-schemas';
 import type { StreamEvent } from '@dorkos/shared/types';
 import { runtimeRegistry } from '../../core/runtime-registry.js';
 import { createAdapter } from '../adapter-factory.js';
+import { CanonicalConnectorRuntimeAuthorityResolver } from '../../connectors/principal/runtime-authority-resolver.js';
 
 const AGENT_ID = '01AGENTULIDDOR1627';
 const MESH_SUBJECT = `relay.agent.ana.${AGENT_ID}`;
@@ -193,6 +194,33 @@ describe('a mesh agent subject runs on the target agent’s own runtime', () => 
     expect(claude.sendMessage).not.toHaveBeenCalled();
   });
 
+  it('authorizes Codex tools on the first Relay turn before the runtime emits content', async () => {
+    await writeAgentManifest('codex', agentDir);
+    const authority = new CanonicalConnectorRuntimeAuthorityResolver({
+      sessions: runtimeRegistry,
+      mesh: { getByPath: (dir) => (dir === agentDir ? { id: AGENT_ID } : undefined) },
+      owner: { kind: 'local_install', installationId: 'relay-validation' },
+    });
+    codex.withScenarios([
+      async function* () {
+        const sessionId = vi.mocked(codex.sendMessage).mock.calls.at(-1)![0];
+        await authority.authorizeTurn({
+          runtime: 'codex',
+          canonicalSessionId: sessionId,
+          agentPath: agentDir,
+          signal: new AbortController().signal,
+        });
+        yield { type: 'text_delta', data: { text: 'authorized' } } as StreamEvent;
+        yield { type: 'done', data: {} } as StreamEvent;
+      },
+    ]);
+    const result = await adapter.deliver(MESH_SUBJECT, agentEnvelope(), {
+      agent: { directory: agentDir, runtime: 'codex' },
+    });
+    expect(result.success).toBe(true);
+    expect(await runtimeRegistry.getSessionAgentPath(AGENT_ID)).toBe(agentDir);
+  });
+
   it('answers a claude-code agent on claude-code', async () => {
     await writeAgentManifest('claude-code', agentDir);
 
@@ -349,6 +377,23 @@ describe('a mesh agent subject runs on the target agent’s own runtime', () => 
 
       expect(second.success).toBe(true);
       expect(codex.sendMessage).toHaveBeenCalledOnce();
+    });
+
+    it('preserves an existing Codex owner when a later turn produces no content', async () => {
+      await writeAgentManifest('codex', agentDir);
+      await runtimeRegistry.persistSessionRuntime(
+        AGENT_ID,
+        'codex',
+        { kind: 'agent-dm' },
+        agentDir
+      );
+      codex.withScenarios([crashScenario]);
+      await adapter.deliver(MESH_SUBJECT, agentEnvelope(), meshContext());
+      expect(await runtimeRegistry.resolveSessionRuntime(AGENT_ID)).toEqual({
+        type: 'codex',
+        bound: true,
+      });
+      expect(await runtimeRegistry.getSessionAgentPath(AGENT_ID)).toBe(agentDir);
     });
 
     it('a crashed first turn leaves the manifest in charge of the next one', async () => {

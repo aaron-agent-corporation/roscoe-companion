@@ -471,6 +471,7 @@ function invokeThroughRegistry(
     ...(context?.cwd ? { cwd: context.cwd } : {}),
     ...(context?.serverPrincipal ? { serverPrincipal: context.serverPrincipal } : {}),
     ...(context?.mcpServer ? { mcpServer: context.mcpServer } : {}),
+    ...(context?.handTools ? { handTools: context.handTools } : {}),
     ...((signal ?? context?.signal) ? { signal: signal ?? context?.signal } : {}),
     ...(approvalToken ? { approvalToken } : {}),
     retryChannel: 'mcp-argument',

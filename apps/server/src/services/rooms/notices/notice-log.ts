@@ -29,6 +29,7 @@
  *
  * @module server/services/rooms/notices/notice-log
  */
+import { buildOutsideTurnNotice } from './notice-copy.js';
 import type { Room, RoomEntry, RoomEntryBody } from '@dorkos/shared/room-schemas';
 import { logger } from '../../../lib/logger.js';
 import {
@@ -197,6 +198,7 @@ export class RoomNoticeLog {
    * cascade may legitimately notice again."
    */
   private readonly noticedCascades = new Set<string>();
+  private readonly noticedOutsideTurns = new Set<string>();
 
   /**
    * `(room, cascade, agent)` triples the room has already said an agent read and
@@ -474,6 +476,17 @@ export class RoomNoticeLog {
     if (damped) return;
     const body = buildWaitingNotice(agent.displayName, agent.authorId, waiting.kind);
     if (this.writeNotice(room, entry, agent.authorId, body)) remember(this.noticedWaiting, key);
+  }
+
+  /** Explain one outside-turn refusal per posting author, room and clock hour. */
+  announceOutsideTurn(room: Room, entry: RoomEntry, authorId: string): void {
+    const key = `${room.id}:${entry.authorId}:${Math.floor(Date.now() / 3_600_000)}`;
+    if (this.noticedOutsideTurns.has(key)) return;
+    const reason =
+      room.kind === 'channel' ? 'channel' : entry.cascadeRoot === entry.id ? 'cold-start' : 'limit';
+    if (this.writeNotice(room, entry, authorId, buildOutsideTurnNotice(authorId, reason))) {
+      remember(this.noticedOutsideTurns, key);
+    }
   }
 
   /**

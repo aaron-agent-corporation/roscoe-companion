@@ -773,6 +773,9 @@ describe('hand-registered MCP tools carry a permission tier', () => {
           expect(sideEffects()).toEqual([]);
 
           approvals.grant(asked.approvalId as string);
+          if (server === 'external') {
+            expect(approvals.verdictDelivery(asked.approvalId as string)).toBeUndefined();
+          }
           const result = await tools.get(name)!.call({
             ...DESTRUCTIVE_INPUT[name],
             approvalToken: asked.approvalToken as string,

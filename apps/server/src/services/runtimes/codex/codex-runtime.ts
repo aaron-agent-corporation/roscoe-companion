@@ -1,3 +1,4 @@
+import { buildMessagingToolsBlock } from '../shared/messaging/tools-context.js';
 import { AccountsAccessContext } from '../shared/accounts-access-context.js';
 /**
  * Codex Runtime — implements the AgentRuntime interface for OpenAI Codex.
@@ -724,13 +725,15 @@ export class CodexRuntime implements AgentRuntime {
       // Beside it, one line per Blocked permission area (spec `agent-permissions`
       // D15), resolved per turn like the menu: the runtime listener hides the
       // same area's tools from this turn's list.
+      const visibility = dorkosTools ? await resolveToolVisibilityFor(agentPath) : undefined;
       const agentContext = dorkosTools
         ? [
             neutralContextSelection.text,
             buildRoomToolsBlock(CODEX_DORKOS_TOOL_PREFIX),
             // The agent's own Blocked areas, read where its manifest lives —
             // the listener hides the same areas keyed on the same anchor.
-            renderBlockedAreaLines((await resolveToolVisibilityFor(agentPath)).blockedAreas),
+            buildMessagingToolsBlock(CODEX_DORKOS_TOOL_PREFIX, visibility!.blockedAreas),
+            renderBlockedAreaLines(visibility!.blockedAreas),
           ]
             .filter(Boolean)
             .join('\n\n')
