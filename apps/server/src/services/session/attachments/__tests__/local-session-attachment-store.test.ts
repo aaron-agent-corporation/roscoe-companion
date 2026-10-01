@@ -73,6 +73,15 @@ describe('LocalSessionAttachmentStore', () => {
     expect(files).toEqual([`${id}.png`]);
   });
 
+  it('round-trips scoped Relay attachments using a portable directory name', async () => {
+    const id = '01ARZ3NDEKTSV4RRFFQ69G5FAV:context-1';
+    const put = await store.put(id, 'abc123', 'image/png', PNG);
+    expect(await store.peek(id, 'abc123', 'image/png')).toEqual(put);
+    expect(store.urlFor(id, 'abc123', 'image/png')).toBe(put.url);
+    const folders = await readdir(path.join(dorkHome, 'sessions'));
+    expect(folders).toEqual([expect.stringMatching(/^relay-[a-f0-9]{64}$/)]);
+  });
+
   it('peek answers what a prior put answered, and null when nothing is stored', async () => {
     expect(await store.peek(SESSION, 'abc123', 'image/png')).toBeNull();
     const put = await store.put(SESSION, 'abc123', 'image/png', PNG);

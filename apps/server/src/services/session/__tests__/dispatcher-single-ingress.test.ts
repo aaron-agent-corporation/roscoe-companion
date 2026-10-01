@@ -83,7 +83,7 @@ const ALLOWED = new Map<string, string>([
       'does for it. What it no longer skips is the SERIALIZATION. An ATTENDED run ' +
       'takes the same chain slot, the same session write-lock, the same ' +
       'stranded-turn settle and the same canonical rekey a dispatch takes, ' +
-      'through `tasks/session/run-projection.ts` — because it now feeds a ' +
+      'through `session/turn-identity/claim-session-turn.ts` — because it now feeds a ' +
       'projector, and a sticky task can resume the very session somebody is ' +
       'typing in. A SCHEDULED fire still needs none of it: it runs on a fresh ' +
       'session of its own that no second writer can reach, and it opens no ' +

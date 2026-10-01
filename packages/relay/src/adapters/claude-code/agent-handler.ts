@@ -10,7 +10,11 @@
 
 import { randomUUID } from 'node:crypto';
 import type { RelayEnvelope } from '@dorkos/shared/relay-schemas';
-import { StreamEventTypeSchema, type PermissionMode } from '@dorkos/shared/schemas';
+import {
+  SessionConversationIdSchema,
+  StreamEventTypeSchema,
+  type PermissionMode,
+} from '@dorkos/shared/schemas';
 import type { StreamEvent } from '@dorkos/shared/types';
 import { CONTEXT_TAG } from '@dorkos/shared/additional-context';
 import { defuseSystemTags } from '@dorkos/shared/untrusted-text';
@@ -32,6 +36,8 @@ import type {
   ExecutionSettingsResolver,
   SessionRuntimeBinder,
   SessionRuntimePreparer,
+  SessionTurnClaimer,
+  RelaySessionTurn,
   TurnDeskCheck,
   TurnExecutionSettings,
 } from './types.js';
@@ -100,6 +106,8 @@ export interface AgentHandlerDeps {
   bindSessionRuntime?: SessionRuntimeBinder;
   /** Establish tool authority at launch, with cleanup for a turn that never starts. */
   prepareSessionRuntime?: SessionRuntimePreparer;
+  /** Durable projection and serialization for this agent turn. */
+  claimSessionTurn?: SessionTurnClaimer;
   /**
    * Where this turn records the envelope it is answering, so the agent's own
    * `relay_send*` calls continue that budget instead of minting a fresh one
@@ -496,6 +504,12 @@ export async function handleAgentMessage(
     }
   }
 
+  if (conversationId && !SessionConversationIdSchema.safeParse(conversationId).success) {
+    controller.abort(
+      new DeskRefusal('Conversation IDs must use 1–128 letters, numbers, underscores, or hyphens.')
+    );
+  }
+
   // Stopped before it could start — expired above, or stopped while it waited in
   // the concurrency line or in its session's queue behind another turn. Nothing
   // about it may start: no session, no `sendMessage`, no bill. The terminal error
@@ -503,18 +517,6 @@ export async function handleAgentMessage(
   // instead of hanging (DOR-791).
   const stoppedBeforeStart = controller.signal.aborted;
 
-  // Only mark hasStarted when we have a real SDK session ID from the persistent
-  // store.  Without one, the runtime would attempt to resume using the DorkOS-
-  // generated UUID (which the SDK never assigned), causing a "No conversation
-  // found" error before the self-healing retry creates a fresh session.
-  if (!stoppedBeforeStart) {
-    deps.agentManager.ensureSession(ccaSessionKey, {
-      permissionMode: effectivePermissionMode,
-      hasStarted: !!persistedSdkSessionId,
-      ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-      ...executionSettings,
-    });
-  }
   deps.traceStore.updateSpan(envelope.id, { status: 'delivered', deliveredAt: now() });
 
   if (!envelope.replyTo) {
@@ -554,28 +556,19 @@ export async function handleAgentMessage(
   // billing until it finishes on its own. That was true of the TTL deadline too
   // — this listener ends both kinds of stop at the agent (DOR-791).
   //
-  // Interrupting by SESSION KEY is only safe because the adapter runs one turn
-  // per session at a time (`runtimeAdapter.enqueue`, keyed by the same id): the
-  // in-flight turn on this key is necessarily this one, so a stop can never
-  // reach into a bystander's turn. A future change that lets two turns share a
-  // session key concurrently has to give the runtime a narrower handle first.
+  // A queued Relay turn may be waiting for a person's turn to release the
+  // session. Cancellation must reach only a runtime turn we actually started.
+  let runtimeStarted = false;
   controller.signal.addEventListener(
     'abort',
     () => {
-      void interruptTurn(deps.agentManager, ccaSessionKey, `turn ${ccaSessionKey}`, deps.logger);
+      if (runtimeStarted) {
+        void interruptTurn(deps.agentManager, ccaSessionKey, `turn ${ccaSessionKey}`, deps.logger);
+      }
     },
     { once: true }
   );
-  // Tie this turn to the envelope that started it, for as long as it runs
-  // (DOR-791). Anything the agent sends with `relay_send*` while it runs
-  // continues THIS budget — decremented — instead of minting a fresh full one,
-  // which is what let two agents trade messages forever with a hop counter that
-  // reset every lap. Bound BEFORE `sendMessage`, because the tool server is
-  // built as the query starts, and not at all for a turn that never starts:
-  // there is nothing for a turn that will not run to inherit.
-  const releaseInboundBudget = stoppedBeforeStart
-    ? undefined
-    : deps.inboundBudgets?.bind(ccaSessionKey, envelope.budget);
+  let releaseInboundBudget: (() => void) | undefined;
 
   const isInboxReplyTo = envelope.replyTo?.startsWith('relay.inbox.');
 
@@ -594,6 +587,7 @@ export async function handleAgentMessage(
   // ANSWER the caller reads, which is the `agent_result` below (DOR-1337 / F6).
   let inStreamError: string | undefined;
 
+  let sessionTurn: RelaySessionTurn | undefined;
   let forgetLaunchAuthority: (() => Promise<void>) | undefined;
   const forgetLaunchRow = async () => {
     const forget = forgetLaunchAuthority;
@@ -605,12 +599,39 @@ export async function handleAgentMessage(
     }
   };
   try {
+    if (!controller.signal.aborted && deps.claimSessionTurn && effectiveCwd) {
+      sessionTurn = await deps.claimSessionTurn({
+        sessionId: ccaSessionKey,
+        runtimeType: deps.runtimeType ?? deps.agentManager.type ?? 'claude-code',
+        cwd: effectiveCwd,
+        prompt,
+        signal: controller.signal,
+      });
+    }
+    // Only mark hasStarted when we have a real SDK session ID from the persistent
+    // store.  Without one, the runtime would attempt to resume using the DorkOS-
+    // generated UUID (which the SDK never assigned), causing a "No conversation
+    // found" error before the self-healing retry creates a fresh session.
+    if (!controller.signal.aborted) {
+      deps.agentManager.ensureSession(ccaSessionKey, {
+        permissionMode: effectivePermissionMode,
+        hasStarted: !!persistedSdkSessionId,
+        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+        ...executionSettings,
+      });
+    }
     if (!controller.signal.aborted && deps.prepareSessionRuntime) {
       forgetLaunchAuthority = await deps.prepareSessionRuntime({
         sessionId: ccaSessionKey,
         runtimeType: deps.runtimeType ?? deps.agentManager.type ?? 'claude-code',
         ...(agentManifestDir ? { agentDirectory: agentManifestDir } : {}),
       });
+    }
+    if (!controller.signal.aborted) {
+      // Bind only after claiming the session, so a waiting turn cannot replace
+      // the budget of the turn that currently owns it.
+      releaseInboundBudget = deps.inboundBudgets?.bind(ccaSessionKey, envelope.budget);
+      runtimeStarted = true;
     }
     const eventStream = controller.signal.aborted
       ? NO_EVENTS
@@ -631,6 +652,7 @@ export async function handleAgentMessage(
         });
     for await (const event of eventStream) {
       if (controller.signal.aborted) break;
+      sessionTurn?.observe(event);
       eventCount++;
       // Counted apart from `eventCount`, which counts endings too — see the
       // binding write below and `lib/content-events.ts` for why the difference
@@ -692,6 +714,7 @@ export async function handleAgentMessage(
     }
   } catch (err) {
     streamError = err instanceof Error ? err.message : String(err);
+    sessionTurn?.observe({ type: 'error', data: { message: streamError } });
     log.error('[CCA] Streaming error:', describeError(err));
     deps.traceStore.updateSpan(envelope.id, {
       status: 'failed',
@@ -699,6 +722,13 @@ export async function handleAgentMessage(
       error: streamError,
     });
   } finally {
+    if (controller.signal.aborted) {
+      sessionTurn?.observe({
+        type: 'done',
+        data: { sessionId: ccaSessionKey, terminalReason: 'interrupted' },
+      });
+    }
+    await sessionTurn?.finish();
     if (contentEventCount === 0) await forgetLaunchRow();
     if (timeout) clearTimeout(timeout);
     // Released when the QUERY is over, which is not the same instant the

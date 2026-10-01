@@ -10,7 +10,7 @@ import type {
   PermissionMode,
   StreamEvent,
 } from '@dorkos/shared/types';
-import type { RuntimeCapabilities, SseResponse } from '@dorkos/shared/agent-runtime';
+import type { SseResponse } from '@dorkos/shared/agent-runtime';
 import { isTerminalRunStatus, type TaskStore } from './task-store.js';
 import type { ActivityService } from '../activity/activity-service.js';
 import { isRelayEnabled } from '../relay/relay-state.js';
@@ -51,7 +51,12 @@ import { buildTaskAppend } from './task-append.js';
 import { previewNextRuns } from './cron-preview.js';
 import { resolveScheduledRunPermissionMode } from './scheduled-run-power.js';
 import { resolveRunSession } from './session/sticky-session.js';
-import { claimRunTurn, SESSION_BUSY_ERROR, type RunTurn } from './session/run-projection.js';
+import {
+  claimSessionTurn,
+  SESSION_BUSY_ERROR,
+  TASK_RUN_CLIENT_ID,
+  type SessionTurnClaim,
+} from '../session/turn-identity/claim-session-turn.js';
 import { resolveSessionCwd } from '../workspace/resolve-session-cwd.js';
 import { assertOwnDesk, deskBindingFor } from '../core/agent-identity/index.js';
 import {
@@ -237,7 +242,7 @@ export interface SchedulerAgentManager {
    * An ATTENDED run holds it for the whole of its turn, for the reason a
    * person's turn does: it is the only seam that serializes against a DIFFERENT
    * writer, and a sticky task can resume the very session somebody is typing in
-   * (`session/run-projection.ts`). A scheduled fire on a fresh session never
+   * (`session/turn-identity/claim-session-turn.ts`). A scheduled fire on a fresh session never
    * contends for it, and takes it uncontested.
    */
   acquireLock(sessionId: string, clientId: string, res: SseResponse, token?: symbol): boolean;
@@ -1272,7 +1277,7 @@ export class TaskSchedulerService {
     // Asked before anything about the bus, because it is not a question about
     // the bus. A run a person started is a run a person is waiting on, and its
     // approval cards have to reach them — which means the turn has to happen in
-    // the process that holds the session surfaces (`session/run-projection.ts`). Handed
+    // the process that holds the session surfaces (`session/turn-identity/claim-session-turn.ts`). Handed
     // to the relay it also runs under a delivery deadline, and the whole turn is
     // awaited inside it: a card left standing for two minutes while somebody
     // read it failed the run out from under them with "no receiver", for a run
@@ -1419,7 +1424,7 @@ export class TaskSchedulerService {
     // stranded-turn settle, the projection and the rename-following a person's
     // turn gets. Taken inside the `try` below so a session that never came free
     // fails the run through the one finalizer, and released in the `finally`.
-    let turn: RunTurn | undefined;
+    let turn: SessionTurnClaim | undefined;
 
     // What to write as this run's `sessionId`: the RUNTIME's own id after the
     // turn — the id the SDK actually wrote its transcript under — so a sticky
@@ -1457,9 +1462,10 @@ export class TaskSchedulerService {
         // call already has a projector behind its session. Resolves only once
         // the run may safely write to the session — a sticky task whose session
         // a person is mid-turn in waits here rather than opening a second stream
-        // into one projector (`session/run-projection.ts`).
+        // into one projector (`session/turn-identity/claim-session-turn.ts`).
         turn =
-          (await claimRunTurn({
+          (await claimSessionTurn({
+            clientId: TASK_RUN_CLIENT_ID,
             sessionId,
             cwd: effectiveCwd,
             prompt: task.prompt,

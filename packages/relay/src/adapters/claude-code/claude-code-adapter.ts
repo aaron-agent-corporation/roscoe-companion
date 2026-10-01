@@ -864,6 +864,7 @@ export class ClaudeCodeAdapter implements RelayAdapter {
             ...(this.isAgentScopedSubject(subject) && this.deps.prepareSessionRuntime
               ? { prepareSessionRuntime: this.deps.prepareSessionRuntime }
               : {}),
+            ...(this.deps.claimSessionTurn ? { claimSessionTurn: this.deps.claimSessionTurn } : {}),
             turnController,
             inboundBudgets: this.deps.inboundBudgets,
             logger: this.deps.logger,

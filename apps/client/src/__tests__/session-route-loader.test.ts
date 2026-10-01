@@ -99,9 +99,43 @@ describe('sessionRouteLoader', () => {
     }
   }
 
-  it('does not redirect when session param is already present', async () => {
-    const result = await callLoader('?session=abc-123');
+  it('does not redirect when session and directory are already present', async () => {
+    const result = await callLoader('?session=abc-123&dir=/perry');
     expect(result.redirected).toBe(false);
+  });
+
+  it('resolves a notification session folder before showing the agent', async () => {
+    vi.mocked(transport.getSession).mockResolvedValue({
+      id: 'roscoe-session',
+      cwd: '/roscoe',
+    } as Session);
+    const result = await callLoader('?session=roscoe-session&message=message-1');
+    expect(transport.getSession).toHaveBeenCalledWith('roscoe-session');
+    expect(result).toMatchObject({
+      redirected: true,
+      redirect: {
+        replace: true,
+        search: { session: 'roscoe-session', dir: '/roscoe', message: 'message-1' },
+      },
+    });
+  });
+
+  it('keeps a fresh empty chat whose id has no server record yet', async () => {
+    vi.mocked(transport.getSession).mockRejectedValue(
+      Object.assign(new Error('Session not found'), { status: 404 })
+    );
+    expect((await callLoader('?session=fresh-session')).redirected).toBe(false);
+  });
+
+  it('does not guess a folder when a session lookup fails', async () => {
+    const error = new Error('Session unavailable');
+    vi.mocked(transport.getSession).mockRejectedValue(error);
+    await expect(
+      sessionRouteLoader({
+        context: { queryClient, transport },
+        deps: sessionLoaderDeps({ search: sessionSearchSchema.parse({ session: 'missing' }) }),
+      })
+    ).rejects.toBe(error);
   });
 
   it('redirects to cached session when sessions exist', async () => {
