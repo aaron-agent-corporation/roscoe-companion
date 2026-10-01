@@ -257,7 +257,7 @@ describe('AppActions when a DorkOS account problem stops the list', () => {
     expect(await screen.findByText(/This computer’s link needs updating\./)).toBeInTheDocument();
     expect(screen.getByText(/pick up the update/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Link my DorkOS account again' }));
-    expect(openSettings).toHaveBeenCalledWith('access', SETTINGS_RELINK_SECTION);
+    expect(openSettings).toHaveBeenCalledWith('account', SETTINGS_RELINK_SECTION);
   });
 
   it('names a refusal on DorkOS’s end with its title, and offers only a retry', async () => {

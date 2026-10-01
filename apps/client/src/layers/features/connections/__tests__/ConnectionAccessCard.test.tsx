@@ -762,7 +762,7 @@ describe('ConnectionAccessCard — a DorkOS account problem', () => {
       if (relink) {
         expect(button).toBeInTheDocument();
         await userEvent.setup().click(button!);
-        expect(openSettings).toHaveBeenCalledWith('access', SETTINGS_RELINK_SECTION);
+        expect(openSettings).toHaveBeenCalledWith('account', SETTINGS_RELINK_SECTION);
       } else {
         expect(button).not.toBeInTheDocument();
       }

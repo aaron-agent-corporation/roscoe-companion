@@ -34,13 +34,13 @@ export function LoadFailedState({ error, title, description, ...retry }: LoadFai
 }
 
 /**
- * The one action a link problem needs: open Settings › Access and start
+ * The one action a link problem needs: open Settings › DorkOS account and start
  * linking this computer to the DorkOS account again, in one click.
  */
 export function RelinkButton(props: Pick<ButtonProps, 'variant' | 'size' | 'className'>) {
   const settings = useSettingsDeepLink();
   return (
-    <Button {...props} onClick={() => settings.open('access', SETTINGS_RELINK_SECTION)}>
+    <Button {...props} onClick={() => settings.open('account', SETTINGS_RELINK_SECTION)}>
       Link my DorkOS account again
     </Button>
   );

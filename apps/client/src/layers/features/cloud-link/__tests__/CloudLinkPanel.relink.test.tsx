@@ -37,7 +37,7 @@ function renderPanel(transport: Transport) {
   const tree = () => (
     <QueryClientProvider client={queryClient}>
       <TransportProvider transport={transport}>
-        <CloudLinkPanel />
+        <CloudLinkPanel signedOut={<p>What an account adds here</p>} />
       </TransportProvider>
     </QueryClientProvider>
   );
@@ -60,6 +60,12 @@ describe('CloudLinkPanel — linking again while linked', () => {
     await user.click(screen.getByRole('button', { name: 'Link again' }));
     await waitFor(() => expect(transport.startCloudLink).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('RELINK42')).toBeInTheDocument();
+    // Still linked while the new code shows, so no "what an account adds" page,
+    // and one plain line says the link is not gone.
+    expect(screen.queryByText('What an account adds here')).not.toBeInTheDocument();
+    expect(
+      screen.getByText('This computer stays linked until you approve the new code.')
+    ).toBeInTheDocument();
   });
 
   it('starts the new link by itself when it was opened to link again, once', async () => {
@@ -69,7 +75,7 @@ describe('CloudLinkPanel — linking again while linked', () => {
     expect(await screen.findByText('RELINK42')).toBeInTheDocument();
     expect(transport.startCloudLink).toHaveBeenCalledTimes(1);
     // The request is spent, so reopening Settings does not start another link.
-    expect(deepLink.setSection).toHaveBeenCalledWith('account');
+    expect(deepLink.setSection).toHaveBeenCalledWith(null);
   });
 
   it('says why a new link could not start, and keeps the button to try again', async () => {
@@ -103,7 +109,7 @@ describe('CloudLinkPanel — a relink request never disturbs a live code or a lo
 
     deepLink.section = SETTINGS_RELINK_SECTION;
     panel.rerender();
-    await waitFor(() => expect(deepLink.setSection).toHaveBeenCalledWith('account'));
+    await waitFor(() => expect(deepLink.setSection).toHaveBeenCalledWith(null));
     expect(transport.startCloudLink).toHaveBeenCalledTimes(1);
     expect(transport.cancelCloudLink).not.toHaveBeenCalled();
     expect(screen.getByText('RELINK42')).toBeInTheDocument();
@@ -148,7 +154,7 @@ describe('CloudLinkPanel — a relink that did not finish', () => {
     ['expired', 'The code for the new link timed out.'],
     ['failed', 'The new link couldn’t finish.'],
   ] as const)(
-    'keeps showing Linked after a %s relink, with a note that can be dismissed',
+    'keeps showing Signed in after a %s relink, with a note that can be dismissed',
     async (relinkOutcome, line) => {
       const user = userEvent.setup();
       const transport = linkedTransport();
@@ -164,9 +170,9 @@ describe('CloudLinkPanel — a relink that did not finish', () => {
       renderPanel(transport);
       expect(await screen.findByText(new RegExp(line))).toBeInTheDocument();
       expect(screen.getByText(/This computer is still linked\./)).toBeInTheDocument();
-      expect(screen.getByText('Linked')).toBeInTheDocument();
+      expect(screen.getByText('Signed in')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Link again' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /unlink this instance/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /unlink this computer/i })).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Dismiss' }));
       await waitFor(() => expect(transport.cancelCloudLink).toHaveBeenCalledTimes(1));
@@ -174,7 +180,7 @@ describe('CloudLinkPanel — a relink that did not finish', () => {
     }
   );
 
-  it('cancels a relink while its code is showing and goes back to Linked', async () => {
+  it('cancels a relink while its code is showing and goes back to Signed in', async () => {
     const user = userEvent.setup();
     const transport = linkedTransport();
     vi.mocked(transport.cancelCloudLink).mockResolvedValue({

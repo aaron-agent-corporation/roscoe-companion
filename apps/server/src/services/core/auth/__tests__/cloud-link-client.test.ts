@@ -454,7 +454,7 @@ describe('managed connector authority commands', () => {
       cloudCode: 'permission_upgrade_required',
       reason: 'SECRET_HOSTED_ERROR',
       message:
-        'Your DorkOS account link needs updating. Link this computer again in Settings › Access.',
+        'Your DorkOS account link needs updating. Link this computer again in Settings › DorkOS account.',
     });
     const refused = await submitManagedConnectorAuthorityCommand({
       baseUrl: BASE,

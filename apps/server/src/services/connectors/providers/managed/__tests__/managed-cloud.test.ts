@@ -309,7 +309,7 @@ describe('ManagedCloudConnectorProvider', () => {
       code: 'MANAGED_LINK_REQUIRED',
       retryable: false,
       message:
-        'This computer isn’t linked to a DorkOS account, so nothing was sent. Ask the person to link it in Settings › Access in the DorkOS app.',
+        'This computer isn’t linked to a DorkOS account, so nothing was sent. Ask the person to link it in Settings › DorkOS account in the DorkOS app.',
     });
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(manager.getSummary().linked).toBe(false);
