@@ -79,6 +79,15 @@ describe('"Always Allow" and the session mode (DOR-1316)', () => {
     vi.clearAllMocks();
   });
 
+  it('updates the turn mode when Always Allow matches the saved session choice', () => {
+    const { store, session, saved } = storeWithPendingApproval([SESSION_ACCEPT_EDITS]);
+    session.permissionMode = 'acceptEdits';
+    session.turnPermissionMode = 'default';
+    expect(store.approveTool(SESSION_ID, TOOL_CALL_ID, true, { alwaysAllow: true })).toBe(true);
+    expect(session.turnPermissionMode).toBe('acceptEdits');
+    expect(saved).toEqual([]);
+  });
+
   it('adopts the mode the click switches the CLI to, so the label and the next launch agree', async () => {
     const { store, session, saved, resolved } = storeWithPendingApproval([SESSION_ACCEPT_EDITS]);
     // The SDK renamed this conversation on its first turn, so the id the

@@ -393,14 +393,13 @@ export class BindingSubsystem {
           // binding's agent id — so it is also where the manifest that decides
           // this lives.
           const { runtime, runtimeType } = await resolveSessionCreatorRuntime(agentRuntimes, cwd);
-          // No fallback: the binding decides the mode (DOR-604), and the
-          // resolver above cannot answer about permissions at all.
+          // The binding's explicit mode wins over agent/operator defaults.
           runtime.ensureSession(id, {
-            permissionMode,
             cwd,
             // The id is minted one line up, so there is no settings row to find
             // — this is the manifest-then-server ladder, every time.
             ...(await resolveSettings({ sessionId: id, runtimeType, agentDirectory: cwd })),
+            permissionMode,
           });
           // Write down WHO owns this session, at the one moment it is known.
           // Without this the ownership table has no row, `getSessionRuntimeType`

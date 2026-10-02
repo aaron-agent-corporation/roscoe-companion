@@ -402,13 +402,6 @@ export async function handleAgentMessage(
   // payload could claim: a `cwd` resolving to another agent's home is refused.
   const payloadForAgent =
     typeof shaping?.forAgent === 'string' && shaping.forAgent !== '' ? shaping.forAgent : undefined;
-  // A fallback is correct HERE and nowhere upstream: this reads a JSON payload
-  // off the relay bus, so the field can be absent for reasons the binding never
-  // controls (an older publisher, a hand-built envelope). It lands on the
-  // prompting mode — absence is not consent (DOR-604). The in-process readers
-  // that used to default to 'acceptEdits' were the bug and are gone.
-  const effectivePermissionMode: PermissionMode = bindingPerms?.permissionMode ?? 'default';
-
   // Which model an agent is, is a property of the AGENT — so the manifest is
   // looked for where the agent lives, and NOT at `effectiveCwd`. The two differ
   // exactly when a payload names its own working directory: that moves where
@@ -440,6 +433,11 @@ export async function handleAgentMessage(
     requestedAccount,
     log
   );
+  // A binding's explicit choice wins over saved session/operator settings.
+  // Only the trusted host can supply the fallback: an agent payload cannot
+  // grant permissions. With no configured choice, keep prompting.
+  const effectivePermissionMode =
+    bindingPerms?.permissionMode ?? executionSettings.permissionMode ?? 'default';
 
   log.debug?.(
     `[CCA] handleAgentMessage agentId=${agentId} ccaSessionKey=${ccaSessionKey}, ` +
@@ -614,10 +612,10 @@ export async function handleAgentMessage(
     // found" error before the self-healing retry creates a fresh session.
     if (!controller.signal.aborted) {
       deps.agentManager.ensureSession(ccaSessionKey, {
-        permissionMode: effectivePermissionMode,
         hasStarted: !!persistedSdkSessionId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         ...executionSettings,
+        permissionMode: effectivePermissionMode,
       });
     }
     if (!controller.signal.aborted && deps.prepareSessionRuntime) {
@@ -636,7 +634,6 @@ export async function handleAgentMessage(
     const eventStream = controller.signal.aborted
       ? NO_EVENTS
       : deps.agentManager.sendMessage(ccaSessionKey, prompt, {
-          permissionMode: effectivePermissionMode,
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(payloadForAgent ? { forAgent: payloadForAgent } : {}),
           ...(formatBlock ? { systemPromptAppend: formatBlock } : {}),
@@ -645,6 +642,7 @@ export async function handleAgentMessage(
           // → its own default, and a runtime whose sessions are not held in
           // memory sees this call and not the one above.
           ...executionSettings,
+          permissionMode: effectivePermissionMode,
           // A message started this turn, not a person watching the app, so an
           // approval card is answered from the inbox and the verdict wakes the
           // session; the turn does not hold for it (spec `agent-permissions` D6).

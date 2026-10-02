@@ -356,9 +356,8 @@ export function resolveSessionDefaults(opts: {
  *
  * A caller that wants the operator's power level FOR THE TURN IT IS ABOUT TO
  * START says so separately, with {@link resolveUnattendedPermissionMode} — the
- * room runner does and the relay resolver does not, which is exactly the
- * difference between the two surfaces: a relay binding carries a grant a person
- * set on it, and this must never displace one (DOR-604). What the session ROW
+ * room runner and relay resolver both do. The relay keeps saved session
+ * choices ahead of defaults and an explicit binding grant ahead of both. What the session ROW
  * is seeded with is neither call's business; that is the turn origin handed to
  * `persistSessionRuntime` (DOR-2105).
  *
@@ -423,8 +422,8 @@ export async function resolveUnattendedSessionDefaults(opts: {
  * What is left HERE is the
  * per-TURN question: a scheduled run and a room turn's first launch both need
  * a live mode before any row exists to read one off, so they resolve it by
- * name. A relay binding still does not ask at all: it carries a grant a person
- * set on it (DOR-604).
+ * name. Relay messages also ask when no saved permission is available, while
+ * preserving an explicit grant on the binding that carried the message.
  *
  * @param opts.configSection - Which `runtimes.*` key holds the target runtime's
  *   own defaults, from its declared `settings.configSection`. Omitted, `null`,
@@ -462,11 +461,10 @@ export function resolveUnattendedDefaultStop(opts?: {
  * surface nobody is watching — {@link resolveUnattendedDefaultStop}'s answer put
  * through that runtime's capability profile.
  *
- * Two unattended surfaces ask for this by name, for the turn they are about to
- * start, and they must keep answering identically for the same runtime: a
- * scheduled run (`tasks/scheduled-run-power.ts`) and a room turn
- * (`rooms/room-turn-runner.ts`). The session ROW is seeded from the same stop
- * through `permissionSeedForOrigin`, so the two can agree by
+ * Scheduled runs, room turns and relay messages ask for this by name when
+ * they need an operator default for the turn they are about to start. Eligible
+ * session rows are seeded from the same stop through `permissionSeedForOrigin`,
+ * so they can agree by
  * construction rather than by coincidence. Before this existed the task path had its own
  * copy of the stop-to-mode mapping and the room path had none at all, so an
  * operator who chose Full autonomy got a scheduled run at full power and a room

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { SessionEvent, SessionStatus } from '@dorkos/shared/session-stream';
 import type { StreamEvent } from '@dorkos/shared/types';
+import type { MessageOpts } from '@dorkos/shared/agent-runtime';
 
 const optIn = vi.hoisted(() => ({ persistentSession: false }));
 
@@ -166,9 +167,13 @@ function abortedResult(userMessageUuid: string): SDKMessage {
 }
 
 /** Run one turn to completion and collect everything it said. */
-async function turn(sessionId: string, content = 'hello'): Promise<StreamEvent[]> {
+async function turn(
+  sessionId: string,
+  content = 'hello',
+  overrides: MessageOpts = {}
+): Promise<StreamEvent[]> {
   const events: StreamEvent[] = [];
-  for await (const event of runtime.sendMessage(sessionId, content, { cwd: CWD })) {
+  for await (const event of runtime.sendMessage(sessionId, content, { cwd: CWD, ...overrides })) {
     events.push(event);
   }
   return events;
@@ -190,6 +195,36 @@ afterEach(() => {
 });
 
 describe('the opt-in decides which path a message takes', () => {
+  it('changes permissions on a warm process and restores the saved setting next turn', async () => {
+    optIn.persistentSession = true;
+    const sessionId = nextSession();
+    await turn(sessionId);
+    await turn(sessionId, 'bypass turn', { permissionMode: 'bypassPermissions' });
+    expect(cli.latest!.liveSets).toContain('setPermissionMode:bypassPermissions');
+    await turn(sessionId, 'saved default turn');
+    expect(cli.latest!.liveSets).toContain('setPermissionMode:default');
+    expect(cli.launches).toBe(1);
+  });
+
+  it.each(['rejects', 'times out'])(
+    'replaces a warm bypass process when a restriction %s',
+    async (failure) => {
+      optIn.persistentSession = true;
+      const sessionId = nextSession();
+      await turn(sessionId, 'bypass turn', { permissionMode: 'bypassPermissions' });
+      const oldProcess = cli.latest!;
+      vi.spyOn(oldProcess, 'setPermissionMode').mockImplementation(() =>
+        failure === 'rejects'
+          ? Promise.reject(new Error('control refused'))
+          : new Promise<void>(() => {})
+      );
+      await turn(sessionId, 'restricted turn', { permissionMode: 'default' });
+      expect(cli.launches).toBe(2);
+      expect(oldProcess.ended).toBe(true);
+      expect(cli.latest!.options.permissionMode).toBe('default');
+    }
+  );
+
   it('starts a fresh process per message while the setting is off', async () => {
     const sessionId = nextSession();
 

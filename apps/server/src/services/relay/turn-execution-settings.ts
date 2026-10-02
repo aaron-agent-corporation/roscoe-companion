@@ -6,7 +6,7 @@
  * ({@link ExecutionSettingsResolver}) and the server answers. Before that seam
  * existed nothing on the path answered at all: an agent pinned to Opus replied
  * to a colleague on whatever the server happened to default to, while the very
- * same agent addressed in a room or from the cockpit answered on Opus
+ * same agent addressed in a room or from the app answered on Opus
  * (DOR-1344).
  *
  * The answer is deliberately the SAME one a room turn gets — both go through
@@ -38,10 +38,9 @@
  * created here. Merging per key is what makes both kinds yield what the other
  * surfaces already yield.
  *
- * The permission mode is in neither half. The relay resolves its own from the
- * binding that carried the message, and treats an absent one as prompting
- * rather than as consent (DOR-604); an answer from here would be a second
- * answer to a settled question.
+ * Permission choices come from the saved session, then the agent/operator
+ * defaults. The relay keeps an explicit binding permission ahead of this
+ * answer. Missing settings never imply bypass permission.
  *
  * @module services/relay/turn-execution-settings
  */
@@ -52,7 +51,11 @@ import { runtimeRegistry } from '../core/runtime-registry.js';
 import { checkAccountLaunch } from '../core/usage/account-ranking.js';
 import { getAccountUsageStore } from '../core/usage/current-usage-store.js';
 import { resolveAccountRef } from '../core/usage/runtime-accounts.js';
-import { resolveUnattendedSessionDefaults } from '../session/index.js';
+import {
+  readAgentExecutionDefaults,
+  resolveUnattendedPermissionMode,
+  resolveUnattendedSessionDefaults,
+} from '../session/index.js';
 
 /**
  * Build the resolver the built-in relay adapter asks before every turn.
@@ -85,19 +88,19 @@ export function createTurnExecutionSettingsResolver(): ExecutionSettingsResolver
     // resolver promises never to. It could not happen while the runtime was
     // fixed at boot; it can now that it arrives per call, and a runtime nothing
     // declares is the same "no preference" every other absent tier is.
-    const declared = runtimeRegistry.has(runtimeType)
-      ? runtimeRegistry.get(runtimeType).getCapabilities().settings
+    const capabilities = runtimeRegistry.has(runtimeType)
+      ? runtimeRegistry.get(runtimeType).getCapabilities()
       : undefined;
+    const declared = capabilities?.settings;
+    const agent = await readAgentExecutionDefaults(agentDirectory);
     const ladder = await resolveUnattendedSessionDefaults({
       runtimeType,
-      ...(agentDirectory ? { agentPath: agentDirectory } : {}),
+      agent,
       ...(declared ? { declared } : {}),
     });
-    // Picked out by name rather than spread, in both halves: `SessionSettings`
-    // also admits a permission mode (the attended callers ask the ladder for
-    // one, and a stored row usually holds one), and neither may travel back to
-    // the relay. `fastMode` has no tier below the row — no manifest field and no
-    // server default name it — so the row is the only place it can come from.
+    // Merge per key so changing the trust setting does not erase the model.
+    const permissionMode =
+      stored.permissionMode ?? resolveUnattendedPermissionMode({ capabilities, agent });
     const model = stored.model ?? ladder.model;
     const effort = stored.effort ?? ladder.effort;
     const accountHint =
@@ -105,6 +108,7 @@ export function createTurnExecutionSettingsResolver(): ExecutionSettingsResolver
         ? undefined
         : await allowedRelayAccount(requestedAccount, runtimeType, agentDirectory, sessionId);
     return {
+      ...(permissionMode !== undefined && { permissionMode }),
       ...(model !== undefined && { model }),
       ...(effort !== undefined && { effort }),
       ...(stored.fastMode !== undefined && { fastMode: stored.fastMode }),
@@ -174,13 +178,12 @@ function isLedgerRuntime(runtime: string): runtime is LedgerRuntime {
 
 /**
  * What a person has already chosen for this conversation — an empty object when
- * they have chosen nothing, which a session with no row and a row that names
- * only a permission mode both are, and both truthfully.
+ * they have chosen nothing. A row may contain just a permission mode.
  *
  * Tolerant of a failing read on purpose. A locked database here means the
  * question "what has this conversation got?" is unanswerable for a moment, and
- * the honest fallback is the ladder every new session starts on — not a refused
- * turn.
+ * model and effort fall back to the new-session ladder. Permissions keep
+ * prompting because the unreadable row may hold an explicit restriction.
  *
  * @param sessionId - The key the relay turn runs under.
  */
@@ -189,6 +192,7 @@ async function readStoredSettings(sessionId: string): Promise<TurnExecutionSetti
     const stored = await runtimeRegistry.getSessionSettings(sessionId);
     if (!stored) return {};
     return {
+      ...(stored.permissionMode !== undefined && { permissionMode: stored.permissionMode }),
       ...(stored.model !== undefined && { model: stored.model }),
       ...(stored.effort !== undefined && { effort: stored.effort }),
       ...(stored.fastMode !== undefined && { fastMode: stored.fastMode }),
@@ -198,6 +202,6 @@ async function readStoredSettings(sessionId: string): Promise<TurnExecutionSetti
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return {};
+    return { permissionMode: 'default' };
   }
 }
