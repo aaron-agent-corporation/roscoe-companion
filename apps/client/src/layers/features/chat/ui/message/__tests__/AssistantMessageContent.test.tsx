@@ -18,11 +18,14 @@ vi.mock('../StreamingText', () => ({
 vi.mock('../../tools/ToolCallCard', () => ({
   ToolCallCard: ({
     toolCall,
+    turnActive,
   }: {
     toolCall: { toolName: string; startedAt?: number; completedAt?: number };
+    turnActive?: boolean;
   }) => (
     <div
       data-testid="tool-call-card"
+      data-turn-active={String(turnActive)}
       data-started-at={toolCall.startedAt ?? ''}
       data-completed-at={toolCall.completedAt ?? ''}
     >
@@ -129,6 +132,27 @@ describe('AssistantMessageContent — multi-block part rendering', () => {
   afterEach(() => {
     cleanup();
   });
+
+  it.each([false, true])(
+    'passes the actual turn state to unfinished tool cards (active: %s)',
+    (active) => {
+      const message = makeMessage([
+        {
+          type: 'tool_call',
+          toolCallId: 'old-command',
+          toolName: 'Bash',
+          input: '{"command":"echo hello"}',
+          status: 'running',
+        },
+      ]);
+      if (active) message._streaming = true;
+      render(<AssistantMessageContent message={message} />);
+      expect(screen.getByTestId('tool-call-card')).toHaveAttribute(
+        'data-turn-active',
+        String(active)
+      );
+    }
+  );
 
   it('renders interleaved text and tool_call parts in order', () => {
     // Text parts key by index (`text-${i}`) — the client-only `_partId` died
