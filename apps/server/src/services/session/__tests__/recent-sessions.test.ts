@@ -44,6 +44,52 @@ describe('listRecentSessions', () => {
   // this file a test of the behaviour it was written for.
   afterEach(() => setAgentSessionSources(null));
 
+  it('returns nested-agent sessions once before applying the recent limit', async () => {
+    const parent = makeSession('parent', '2026-03-01T00:00:00.000Z', '/team');
+    const child = makeSession('child', '2026-03-02T00:00:00.000Z', '/team/child');
+    const sibling = makeSession('sibling', '2026-03-03T00:00:00.000Z', '/team/sibling');
+    const runtime = runtimeReturning('fake-a', {
+      '/team': [parent, child, sibling],
+      '/team/child': [child],
+      '/team/sibling': [sibling],
+    });
+
+    const result = await listRecentSessions({
+      runtimes: [runtime],
+      agentPaths: ['/team', '/team/child', '/team/sibling'],
+      limit: 3,
+    });
+
+    expect(result.sessions.map((session) => session.id)).toEqual(['sibling', 'child', 'parent']);
+    expect(result.agentActivity).toEqual({
+      '/team': sibling.updatedAt,
+      '/team/child': child.updatedAt,
+      '/team/sibling': sibling.updatedAt,
+    });
+  });
+
+  it.each([false, true])(
+    'keeps the newest duplicate snapshot (child first: %s)',
+    async (childFirst) => {
+      const old = makeSession('child', '2026-03-01T00:00:00.000Z', '/team/child');
+      const fresh = {
+        ...old,
+        title: 'Updated conversation',
+        updatedAt: '2026-03-02T00:00:00.000Z',
+      };
+      const runtime = runtimeReturning('fake-a', {
+        '/team': [old],
+        '/team/child': [fresh],
+      });
+      const result = await listRecentSessions({
+        runtimes: [runtime],
+        agentPaths: childFirst ? ['/team/child', '/team'] : ['/team', '/team/child'],
+        limit: 10,
+      });
+      expect(result.sessions).toEqual([fresh]);
+    }
+  );
+
   it('fans out across paths and runtimes, merged updatedAt desc', async () => {
     const a = runtimeReturning('fake-a', {
       '/p1': [makeSession('a1', '2026-03-01T00:00:00.000Z', '/p1', 'fake-a')],

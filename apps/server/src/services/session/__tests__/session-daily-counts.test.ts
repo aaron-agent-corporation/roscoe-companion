@@ -41,6 +41,21 @@ function runtimeReturning(type: string, byDir: Record<string, Session[]>): FakeA
 const NOW = new Date('2026-08-10T15:00:00');
 
 describe('countSessionsPerDay', () => {
+  it('counts a session listed by both parent and nested agents once', async () => {
+    const child = makeSession('child', daysBefore(NOW, 0), '/team/child');
+    const runtime = runtimeReturning('fake-a', {
+      '/team': [child],
+      '/team/child': [child],
+    });
+    const result = await countSessionsPerDay({
+      runtimes: [runtime],
+      agentPaths: ['/team', '/team/child'],
+      days: 7,
+      now: NOW.getTime(),
+    });
+    expect(result.dailyCounts).toEqual([0, 0, 0, 0, 0, 0, 1]);
+  });
+
   it('counts sessions from EVERY agent path, bucketed oldest day first', async () => {
     const runtime = runtimeReturning('fake-a', {
       '/p1': [

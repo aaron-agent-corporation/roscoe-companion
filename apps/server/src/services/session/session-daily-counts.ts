@@ -74,11 +74,15 @@ export async function countSessionsPerDay(opts: {
 
   const dailyCounts = new Array<number>(days).fill(0);
   const { perPath, warnings } = await fanOutAgentSessions({ runtimes, agentPaths });
+  const counted = new Set<string>();
 
   for (const { members } of perPath) {
     for (const session of members) {
+      // Nested agent directories can return the same conversation twice.
+      if (counted.has(session.id)) continue;
       const age = daysAgo(session.createdAt, now);
       if (age === null || age < 0 || age >= days) continue;
+      counted.add(session.id);
       dailyCounts[days - 1 - age]! += 1;
     }
   }
