@@ -10,7 +10,7 @@
 
 import type {
   InterruptReceipt,
-  PermissionMode,
+  PermissionModeId,
   SessionSettings,
   StreamEvent,
 } from '@dorkos/shared/types';
@@ -18,15 +18,12 @@ import type { RefusedAsk } from '@dorkos/shared/run-refusals';
 import type { ApprovalAuthorizer } from './approval-handler.js';
 
 /**
- * What a relay-triggered turn runs with, beyond its permission mode.
+ * Trusted host settings for a relay-triggered turn.
  *
- * Permissions are deliberately absent. The relay resolves its own mode from the
- * binding that carried the message — and treats an absent one as `'default'`
- * rather than as consent (DOR-604) — so an execution setting that could also
- * carry a permission mode would be a second answer to a question that already
- * has one.
+ * The host reads saved session choices and operator defaults. An explicit
+ * binding permission takes precedence; an agent payload cannot grant power.
  */
-export type TurnExecutionSettings = Omit<SessionSettings, 'permissionMode'> & {
+export type TurnExecutionSettings = SessionSettings & {
   /**
    * Which Claude account (registry id) the turn should LAUNCH on, handed to the
    * runtime as `MessageOpts.accountHint` (DOR-2384). Read only when the turn
@@ -37,7 +34,7 @@ export type TurnExecutionSettings = Omit<SessionSettings, 'permissionMode'> & {
 };
 
 /**
- * What model, effort and fast-mode a relay-triggered turn should start with.
+ * What model, effort, permissions and fast-mode a relay-triggered turn should start with.
  *
  * The adapter cannot answer this itself: the ladder is an agent's manifest, then
  * the server's per-runtime default, and both live host-side (the server's
@@ -205,9 +202,8 @@ export type SessionTurnClaimer = (input: {
  *
  * Kept as a separate interface (rather than importing `AgentRuntime`) so the
  * adapter states only the narrow surface it actually calls. The VALUE types it
- * exchanges are still the shared ones — a permission mode narrowed to `string`
- * here would let a mode nothing can run travel from a relay dispatch into a
- * live session with no compiler objection anywhere along the way.
+ * exchanges are still the shared ones. PermissionModeId is runtime-owned;
+ * each runtime validates the id against its own declared modes.
  */
 export interface AgentRuntimeLike {
   /**
@@ -225,7 +221,7 @@ export interface AgentRuntimeLike {
   ensureSession(
     sessionId: string,
     opts: TurnExecutionSettings & {
-      permissionMode: PermissionMode;
+      permissionMode: PermissionModeId;
       cwd?: string;
       hasStarted?: boolean;
       /**
@@ -241,7 +237,7 @@ export interface AgentRuntimeLike {
     sessionId: string,
     content: string,
     opts?: TurnExecutionSettings & {
-      permissionMode?: PermissionMode;
+      permissionMode?: PermissionModeId;
       cwd?: string;
       /**
        * The home of the agent the turn is dispatched as. Mirrors

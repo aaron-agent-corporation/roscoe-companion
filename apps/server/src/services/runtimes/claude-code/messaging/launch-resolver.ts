@@ -480,11 +480,15 @@ export async function resolveLaunch(args: {
     }
   }
 
+  // Relay and scheduled turns may override a warm session without changing
+  // its saved choice. Both SDK launch paths consume this same resolution.
+  const requestedPermissionMode = messageOpts?.permissionMode ?? session.permissionMode;
+
   // CWD resolution chain: opts.cwd (from caller) -> session.cwd (from creation) -> this.cwd (default)
   const cwdSource = messageOpts?.cwd ? 'opts.cwd' : opts.sessionCwd ? 'session.cwd' : 'default';
   logger.debug('[sendMessage]', {
     session: sessionId,
-    permissionMode: session.permissionMode,
+    permissionMode: requestedPermissionMode,
     hasStarted: session.hasStarted,
     resume: session.hasStarted ? session.sdkSessionId : 'N/A',
     effectiveCwd,
@@ -516,11 +520,12 @@ export async function resolveLaunch(args: {
   // no way to learn why. The note is user-facing and says what changes for them;
   // the log line beside it carries the id, which is the half a person cannot use
   // and an operator reading logs needs.
-  const declaredMode = narrowToClaudeCodeMode(session.permissionMode, 'default');
-  if (declaredMode !== session.permissionMode) {
+  const declaredMode = narrowToClaudeCodeMode(requestedPermissionMode, 'default');
+  if (declaredMode !== requestedPermissionMode) {
     logger.warn('[sendMessage] saved permission mode is not one this runtime offers', {
       session: sessionId,
       stored: session.permissionMode,
+      requested: requestedPermissionMode,
       running: declaredMode,
     });
     statusEvents.push({ type: 'system_status', data: { message: UNKNOWN_MODE_STATUS } });
@@ -540,6 +545,9 @@ export async function resolveLaunch(args: {
   // Every value that reaches here is one the SDK accepts: `narrowToClaudeCodeMode`
   // checked the id and the guard above resolved Auto, so no allowlist is needed.
   sdkOptions.permissionMode = effectivePermissionMode;
+  // Reused SDK callbacks read this mutable turn value. A later UI permission
+  // change updates it too, so callbacks cannot retain the prior turn's grant.
+  session.turnPermissionMode = effectivePermissionMode;
   // Always launch with the bypass capability (ADR-0261). The flag is a pure
   // capability gate the SDK consults ONLY when permissionMode is
   // 'bypassPermissions' — verified inert in default/acceptEdits/plan, which

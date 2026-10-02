@@ -1024,7 +1024,10 @@ async function hasAgentIdentity(
  *   disk.
  */
 export function createCanUseTool(
-  session: InteractiveSession & { permissionMode: PermissionModeId },
+  session: InteractiveSession & {
+    permissionMode: PermissionModeId;
+    turnPermissionMode?: PermissionModeId;
+  },
   log: ToolGateLogger,
   onToolPreflight?: (toolName: string, input: Record<string, unknown>) => Promise<void>,
   resolveIdentity: () => Promise<unknown> = createInSessionContextResolver(
@@ -1069,7 +1072,8 @@ export function createCanUseTool(
       return { behavior: 'allow', updatedInput: input };
     }
 
-    if (resolveModeDecision(session.permissionMode) === 'ask') {
+    const permissionMode = session.turnPermissionMode ?? session.permissionMode;
+    if (resolveModeDecision(permissionMode) === 'ask') {
       // The measurement (spec `auto-mode-classifier-context`). Reaching here in
       // AUTO mode with a DorkOS tool means the runtime's classifier decided this
       // call deserved a person, and DorkOS's own auto-allow list did not cover
@@ -1077,7 +1081,7 @@ export function createCanUseTool(
       // Only `auto`: every other mode asks by design, so counting its cards
       // would bury the signal under the modes that are supposed to produce them.
       if (
-        session.permissionMode === 'auto' &&
+        permissionMode === 'auto' &&
         toolName.startsWith(IN_SESSION_TOOL_PREFIX) &&
         // A configured server wearing the `dorkos` name is not a DorkOS tool,
         // and its stops are not the ones this measurement counts.
@@ -1091,7 +1095,7 @@ export function createCanUseTool(
       // the case that is hardest to explain from the outside.
       log.info('[canUseTool] requesting approval', {
         toolName,
-        permissionMode: session.permissionMode,
+        permissionMode,
         toolUseID: context.toolUseID,
         ...(context.agentID !== undefined ? { agentID: context.agentID } : {}),
       });
@@ -1099,7 +1103,7 @@ export function createCanUseTool(
     }
     log.debug('[canUseTool] auto-allow', {
       toolName,
-      permissionMode: session.permissionMode,
+      permissionMode,
       toolUseID: context.toolUseID,
     });
     return { behavior: 'allow', updatedInput: input };

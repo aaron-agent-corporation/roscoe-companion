@@ -44,6 +44,37 @@ const noopLog = { debug: () => {}, info: () => {} };
 describe('createCanUseTool — approval gate', () => {
   const NON_SAFE_TOOL = 'Bash';
 
+  it('uses the current turn restriction even when the saved mode is bypass', async () => {
+    const session = { ...makeSession('bypassPermissions'), turnPermissionMode: 'default' };
+    const controller = new AbortController();
+    const pending = createCanUseTool(session, noopLog)(
+      'Bash',
+      { command: 'pwd' },
+      { toolUseID: 'turn-restricted', signal: controller.signal }
+    );
+    expect(session.pendingInteractions.has('turn-restricted')).toBe(true);
+    controller.abort();
+    await pending;
+  });
+
+  it('uses current turn bypass and sees a later live permission change', async () => {
+    const session = { ...makeSession('default'), turnPermissionMode: 'bypassPermissions' };
+    const gate = createCanUseTool(session, noopLog);
+    expect(await gate('Bash', { command: 'pwd' }, makeContext('turn-bypass'))).toMatchObject({
+      behavior: 'allow',
+    });
+    session.turnPermissionMode = 'default';
+    const controller = new AbortController();
+    const pending = gate(
+      'Bash',
+      { command: 'pwd' },
+      { toolUseID: 'turn-tightened', signal: controller.signal }
+    );
+    expect(session.pendingInteractions.has('turn-tightened')).toBe(true);
+    controller.abort();
+    await pending;
+  });
+
   it('routes a non-safe tool to approval (not auto-allow) in default mode', async () => {
     const session = makeSession('default');
     const canUseTool = createCanUseTool(session, noopLog);

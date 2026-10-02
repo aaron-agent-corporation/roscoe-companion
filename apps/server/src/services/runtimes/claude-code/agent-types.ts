@@ -34,6 +34,8 @@ export interface AgentSession {
    * (`messaging/launch-resolver.ts`), and nowhere earlier.
    */
   permissionMode: PermissionModeId;
+  /** Current turn's effective mode; per-turn overrides never replace the saved choice. */
+  turnPermissionMode?: PermissionModeId;
   model?: string;
   effort?: EffortLevel;
   fastMode?: boolean;

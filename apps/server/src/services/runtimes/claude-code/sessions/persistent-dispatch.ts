@@ -595,6 +595,12 @@ export class PersistentDispatch {
           // setter that went unanswered inside its bound leaves its pin where it
           // was, and the next dispatch has to see that (DOR-1301).
           bundle.fingerprint = await reuse.apply(control);
+          // A refused or timed-out permission setter leaves the process under
+          // its old grant. Relaunch before sending any part of the new turn.
+          if (bundle.fingerprint.live.permissionMode !== plan.fingerprint.live.permissionMode) {
+            await this.replaceProcess(key);
+            bundle = this.acquire(key, session, opts);
+          }
         } catch (err) {
           if (err instanceof AccountPinViolationError) {
             logger.error('[persistent-dispatch] refused a cross-account dispatch', {

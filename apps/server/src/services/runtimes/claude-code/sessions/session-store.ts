@@ -190,14 +190,14 @@ export class SessionStore {
    * outgoing one, whichever the store still recognises.
    *
    * Every id the session has ever answered to keeps pointing at it. Clients
-   * legitimately hold different links in that chain — the cockpit adopts the id
+   * legitimately hold different links in that chain — the app adopts the id
    * the 202 reports, a room holds the id it bound — and a turn already in
    * flight is being tracked by the id it started under. Eviction sweeps the
    * whole chain, so nothing outlives the session.
    *
    * **WHEN this is called is load-bearing; the order of the two writes inside it
    * is not.** The caller (`message-sender`) invokes this BEFORE yielding the
-   * event that lets `trigger-turn` announce the canonical id to the cockpit. A
+   * event that lets `trigger-turn` announce the canonical id to the app. A
    * client can only send a message under an id it has been told, so moving the
    * row first is what stops the session's own next POST from looking like a
    * brand-new session to `persistSessionRuntime` — which would mint a second
@@ -554,7 +554,7 @@ export class SessionStore {
       // the first thing to reach a session whose in-memory state was evicted or
       // the server restarted since. Without this, the auto-create silently
       // reset an ENFORCED bypassPermissions/plan session back to 'default'
-      // while the DB row — and the cockpit's display overlay reading it —
+      // while the DB row — and the app's display overlay reading it —
       // kept showing the operator's real choice (DOR-1151). Precedence
       // mirrors `ensureForMessage`: per-call override → persisted → runtime
       // default.
@@ -577,8 +577,9 @@ export class SessionStore {
     await this.settingsPort?.saveSessionSettings(sessionId, opts);
     let permissionModePendingUntilNextTurn = false;
     if (opts.permissionMode) {
-      const prevMode = session.permissionMode;
+      const prevMode = session.turnPermissionMode ?? session.permissionMode;
       session.permissionMode = opts.permissionMode;
+      session.turnPermissionMode = opts.permissionMode;
       if (session.activeQuery) {
         const query = session.activeQuery;
         // Bounded (DOR-1301): on a session winding down, DorkOS has already
@@ -618,17 +619,9 @@ export class SessionStore {
           // mode that never asks). Only the tightening direction is carried up:
           // see `SessionUpdateResult.permissionModePendingUntilNextTurn`.
           //
-          // `prevMode` is what the SESSION was set to, which is very nearly —
-          // but not exactly — what the running turn is doing: the launcher can
-          // coerce `auto` down to `default` for a model that cannot do Auto
-          // without writing that back (`messaging/launch-resolver.ts`), so an
-          // `auto` → `default` PATCH on such a model reports pending for a turn
-          // that is already running `default`. Left standing deliberately. The
-          // effective mode is resolved per launch and never recorded on the
-          // session, so comparing against it would mean plumbing a second
-          // source of truth through here — and the error is in the safe
-          // direction: it says "not yet" about a change that has in fact taken,
-          // which costs one sentence and never hides a real gap.
+          // Compare against the turn's effective mode, which may differ from
+          // the saved choice because Relay supplied an override or Auto was
+          // unavailable on this model.
           permissionModePendingUntilNextTurn = tightensDeclaredMode(
             CLAUDE_MODES,
             prevMode,
@@ -742,7 +735,7 @@ export class SessionStore {
    */
   private adoptSuggestedMode(session: AgentSession, suggestions: PermissionUpdate[]): void {
     const mode = sessionScopedMode(suggestions);
-    if (!mode || mode === session.permissionMode) return;
+    if (!mode) return;
     if (!isAdoptableMode(mode)) {
       // info, not debug: a person clicked one button and a mode change went
       // unrecorded. That is the kind of divergence this ticket existed about,
@@ -754,6 +747,8 @@ export class SessionStore {
       });
       return;
     }
+    session.turnPermissionMode = mode;
+    if (mode === session.permissionMode) return;
     logger.debug('[approveTool] always-allow switched the session mode', {
       session: session.sdkSessionId,
       from: session.permissionMode,
@@ -852,7 +847,7 @@ export class SessionStore {
 
   /**
    * Interrupt a SPECIFIC query for a session — **the bounded Stop** every
-   * caller here ends up in (the cockpit's button, a room's halt, the stall
+   * caller here ends up in (the app's button, a room's halt, the stall
    * watchdog, a Stop during launch).
    *
    * **The property: Stop is bounded.** A graceful `interrupt()` that is neither

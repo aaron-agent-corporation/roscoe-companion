@@ -13,6 +13,14 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { USER_CONFIG_DEFAULTS, type UserConfig } from '@dorkos/shared/config-schema';
 import type { SessionSettings } from '@dorkos/shared/types';
+import { CLAUDE_CODE_CAPABILITIES } from '../../runtimes/claude-code/runtime-constants.js';
+import { CODEX_CAPABILITIES } from '../../runtimes/codex/runtime-constants.js';
+import { OPENCODE_CAPABILITIES } from '../../runtimes/opencode/runtime-constants.js';
+import {
+  initPermissionGate,
+  readAgentPermissionsFromManifest,
+  resetPermissionGate,
+} from '../../core/capabilities/permission-enforcement.js';
 
 /** What `session_metadata` holds for the session under test — `null` = no row. */
 let storedSettings: SessionSettings | null = null;
@@ -32,7 +40,14 @@ vi.mock('../../core/runtime-registry.js', () => ({
     get: (type: string) => {
       const declared = registered[type];
       if (!declared) throw new Error(`Runtime '${type}' not registered`);
-      return { getCapabilities: () => ({ settings: { ...declared, sections: [] } }) };
+      const capabilities = {
+        'claude-code': CLAUDE_CODE_CAPABILITIES,
+        codex: CODEX_CAPABILITIES,
+        opencode: OPENCODE_CAPABILITIES,
+      }[type];
+      return {
+        getCapabilities: () => ({ ...capabilities, settings: { ...declared, sections: [] } }),
+      };
     },
   },
 }));
@@ -190,7 +205,7 @@ describe('createTurnExecutionSettingsResolver', () => {
       agentDirectory: agentDir,
     });
 
-    expect(settings).toEqual({ model: 'claude-haiku-4-5' });
+    expect(settings).toEqual({ model: 'claude-haiku-4-5', permissionMode: 'plan' });
   });
 
   it('fills the keys a row leaves unanswered, and keeps the ones it names', async () => {
@@ -213,9 +228,7 @@ describe('createTurnExecutionSettingsResolver', () => {
     expect(settings).toEqual({ model: 'claude-haiku-4-5', effort: 'high', fastMode: true });
   });
 
-  it('never answers with a permission mode, whatever the row holds', async () => {
-    // The relay resolves its own mode from the binding that carried the message
-    // and treats an absent one as prompting rather than as consent (DOR-604).
+  it('honors the permission mode already chosen for a conversation', async () => {
     storedSettings = { permissionMode: 'bypassPermissions', model: 'opus' };
 
     const settings = await createTurnExecutionSettingsResolver()({
@@ -224,7 +237,63 @@ describe('createTurnExecutionSettingsResolver', () => {
       agentDirectory: agentDir,
     });
 
-    expect(settings).toEqual({ model: 'opus' });
+    expect(settings).toEqual({ model: 'opus', permissionMode: 'bypassPermissions' });
+  });
+
+  it.each([
+    ['claude-code', 'claudeCode', true],
+    ['codex', 'codex', true],
+    ['opencode', 'opencode', false],
+  ] as const)(
+    'uses the configured autonomy default for a new %s conversation',
+    async (runtimeType, configSection, supportsEffort) => {
+      registered = { [runtimeType]: { configSection, supportsEffort } };
+      runtimesConfig = { ...USER_CONFIG_DEFAULTS.runtimes, defaultTrustStop: 'autonomy' };
+      const settings = await createTurnExecutionSettingsResolver()({
+        runtimeType,
+        sessionId: 'new-session',
+      });
+      expect(settings.permissionMode).toBe('bypassPermissions');
+    }
+  );
+
+  it('keeps an agent permission restriction over the app autonomy default', async () => {
+    runtimesConfig = { ...USER_CONFIG_DEFAULTS.runtimes, defaultTrustStop: 'autonomy' };
+    await writeManifest({ permissions: { filesAndCommands: 'ask' } });
+    initPermissionGate({ readAgentPermissions: readAgentPermissionsFromManifest });
+    try {
+      const settings = await createTurnExecutionSettingsResolver()({
+        runtimeType: 'claude-code',
+        sessionId: 'new-session',
+        agentDirectory: agentDir,
+      });
+      expect(settings.permissionMode).toBe('default');
+    } finally {
+      resetPermissionGate();
+    }
+  });
+
+  it('uses the runtime-specific permission default before the global one', async () => {
+    runtimesConfig = {
+      ...USER_CONFIG_DEFAULTS.runtimes,
+      defaultTrustStop: 'autonomy',
+      claudeCode: { ...USER_CONFIG_DEFAULTS.runtimes.claudeCode, defaultTrustStop: 'ask' },
+    };
+    const settings = await createTurnExecutionSettingsResolver()({
+      runtimeType: 'claude-code',
+      sessionId: 'new-session',
+    });
+    expect(settings.permissionMode).toBe('default');
+  });
+
+  it('keeps an explicit session restriction over the app autonomy default', async () => {
+    runtimesConfig = { ...USER_CONFIG_DEFAULTS.runtimes, defaultTrustStop: 'autonomy' };
+    storedSettings = { permissionMode: 'default' };
+    const settings = await createTurnExecutionSettingsResolver()({
+      runtimeType: 'claude-code',
+      sessionId: 'existing-session',
+    });
+    expect(settings.permissionMode).toBe('default');
   });
 
   it('never seeds a Codex model onto the claude-code session it falls back to', async () => {
@@ -263,10 +332,9 @@ describe('createTurnExecutionSettingsResolver', () => {
     expect(settings).toEqual({ model: 'opus' });
   });
 
-  it('starts a new session on the ladder when the settings row cannot be read', async () => {
-    // A locked database makes "has this conversation got settings?" unanswerable
-    // for a moment. The honest fallback is the ladder a new session starts on,
-    // never a refused turn — the message is somebody's agent talking.
+  it('keeps prompting when the saved setting cannot be read', async () => {
+    // An unreadable row may hold a restriction, even with global autonomy.
+    runtimesConfig = { ...USER_CONFIG_DEFAULTS.runtimes, defaultTrustStop: 'autonomy' };
     readSettings = () => Promise.reject(new Error('database is locked'));
     await writeManifest({ model: 'claude-haiku-4-5' });
 
@@ -276,7 +344,7 @@ describe('createTurnExecutionSettingsResolver', () => {
       agentDirectory: agentDir,
     });
 
-    expect(settings).toEqual({ model: 'claude-haiku-4-5' });
+    expect(settings).toEqual({ model: 'claude-haiku-4-5', permissionMode: 'default' });
   });
 
   it('drops an effort a runtime says it has none of', async () => {

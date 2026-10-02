@@ -37,6 +37,17 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AgentRuntimeLike } from '@dorkos/relay';
+import { USER_CONFIG_DEFAULTS } from '@dorkos/shared/config-schema';
+import { CLAUDE_CODE_CAPABILITIES } from '../../runtimes/claude-code/runtime-constants.js';
+
+vi.mock('../../core/config-manager.js', () => ({
+  configManager: {
+    get: (key: string) =>
+      key === 'runtimes'
+        ? { ...USER_CONFIG_DEFAULTS.runtimes, defaultTrustStop: 'autonomy' }
+        : undefined,
+  },
+}));
 
 const getDefaultType = vi.fn(() => 'claude-code');
 const getSessionRuntimeType = vi.fn(async (_sessionId: string) => 'claude-code');
@@ -56,6 +67,7 @@ vi.mock('../../core/runtime-registry.js', () => ({
     getSessionSettings: () => Promise.resolve(null),
     get: () => ({
       getCapabilities: () => ({
+        ...CLAUDE_CODE_CAPABILITIES,
         settings: { configSection: 'claudeCode', supportsEffort: true, sections: [] },
       }),
     }),
@@ -313,7 +325,7 @@ describe('BindingSubsystem.init runtime selection', () => {
     }
   });
 
-  it("creates a chat-originated session on the addressed agent's own model", async () => {
+  it("keeps the binding permission over app autonomy while using the agent's model", async () => {
     // The session a Telegram or Slack message opens is created HERE, not by the
     // relay adapter: the router mints the id and calls this, then publishes to
     // `relay.agent.*`. By the time the adapter's own `ensureSession` runs with a

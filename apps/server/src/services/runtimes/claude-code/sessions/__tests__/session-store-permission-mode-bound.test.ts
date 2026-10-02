@@ -95,6 +95,18 @@ describe('changing permission mode is bounded (DOR-1301)', () => {
     expect(saved).toEqual([{ permissionMode: 'bypassPermissions' }]);
   });
 
+  it('reports a failed tightening from a transient bypass turn and updates its callback mode', async () => {
+    const { query } = fakeQuery('rejects');
+    const store = storeWithLiveTurn(query, 'default');
+    const session = store.findSession(SESSION_ID)!;
+    session.turnPermissionMode = 'bypassPermissions';
+    await expect(store.updateSession(SESSION_ID, { permissionMode: 'default' })).resolves.toEqual({
+      updated: true,
+      permissionModePendingUntilNextTurn: true,
+    });
+    expect(session.turnPermissionMode).toBe('default');
+  });
+
   it('does not wait on the clock when the CLI answers', async () => {
     const { query, calls } = fakeQuery('acks');
     const store = storeWithLiveTurn(query);

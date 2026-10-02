@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { executeSdkQuery, type MessageSenderOpts } from '../message-sender.js';
 import type { AgentSession } from '../../agent-types.js';
 import type { StreamEvent } from '@dorkos/shared/types';
+import type { MessageOpts } from '@dorkos/shared/agent-runtime';
 import { query, type Options, type SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -81,7 +82,8 @@ function resultMsg(): SDKMessage {
 /** Drive one turn, returning the SDK `Options` and every yielded StreamEvent. */
 async function runTurn(
   session: AgentSession,
-  opts: Partial<MessageSenderOpts>
+  opts: Partial<MessageSenderOpts>,
+  overrides?: MessageOpts
 ): Promise<{ options: Options; events: StreamEvent[] }> {
   let capturedOptions: Options | undefined;
   vi.mocked(query).mockImplementation((args) => {
@@ -98,7 +100,7 @@ async function runTurn(
     onSdkSessionRebind: async () => {},
     ...opts,
   };
-  for await (const event of executeSdkQuery('s1', 'hello', session, messageOpts)) {
+  for await (const event of executeSdkQuery('s1', 'hello', session, messageOpts, overrides)) {
     events.push(event);
   }
   return { options: capturedOptions!, events };
@@ -108,6 +110,21 @@ describe('executeSdkQuery — auto-mode guard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each([
+    ['default', 'bypassPermissions'],
+    ['bypassPermissions', 'default'],
+  ] as const)(
+    'honors a per-turn %s to %s override without changing the session choice',
+    async (saved, requested) => {
+      const session = makeSession({ permissionMode: saved, hasStarted: true });
+      const { options } = await runTurn(session, {}, { permissionMode: requested });
+      expect(options.permissionMode).toBe(requested);
+      expect(session.permissionMode).toBe(saved);
+      const following = await runTurn(session, {});
+      expect(following.options.permissionMode).toBe(saved);
+    }
+  );
 
   it('sends default when auto support is UNKNOWN, without claiming auto is unavailable', async () => {
     const session = makeSession();
