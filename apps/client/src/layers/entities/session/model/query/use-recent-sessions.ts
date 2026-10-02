@@ -8,6 +8,7 @@
  *
  * @module entities/session/model/query/use-recent-sessions
  */
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RecentSessionsResponse } from '@dorkos/shared/types';
 import { useTransport } from '@/layers/shared/model';
@@ -17,7 +18,7 @@ import { sessionKeys } from '../../api/query-keys';
 import { syncSessionDetailCache } from '../../lib/sync-session-detail-cache';
 
 /**
- * How many recent sessions the cockpit asks for when a caller does not say.
+ * How many recent sessions the app asks for when a caller does not say.
  *
  * **One window, so one request.** The limit is part of the cache key, so every
  * distinct window is a separate entry and a separate round trip. On boot the
@@ -55,9 +56,27 @@ export function useRecentSessions<TData = RecentSessionsResponse>(
 ) {
   const transport = useTransport();
   const queryClient = useQueryClient();
+  const select = options.select;
+  const selectUnique = useCallback(
+    (data: RecentSessionsResponse): TData => {
+      // An older build's persisted boot cache can contain the same session
+      // from multiple nested agents. Normalize in select, not queryFn: cached
+      // rows render before any request and duplicate keys can leave ghost DOM
+      // rows behind even after a fresh response arrives. Narrow only afterward.
+      const seen = new Set<string>();
+      const sessions = data.sessions.filter((session) => {
+        if (seen.has(session.id)) return false;
+        seen.add(session.id);
+        return true;
+      });
+      const unique = sessions.length === data.sessions.length ? data : { ...data, sessions };
+      return select ? select(unique) : (unique as TData);
+    },
+    [select]
+  );
   return useQuery<RecentSessionsResponse, Error, TData>({
     enabled: options.enabled ?? true,
-    ...(options.select === undefined ? {} : { select: options.select }),
+    select: selectUnique,
     queryKey: sessionKeys.recent(limit),
     queryFn: async () => {
       const observedAt = Date.now();

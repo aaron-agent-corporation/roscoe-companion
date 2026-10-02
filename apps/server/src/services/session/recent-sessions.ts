@@ -17,9 +17,8 @@ import { fanOutAgentSessions } from './agent-session-fanout.js';
 /**
  * List the most-recent sessions across the given agent project directories.
  *
- * Keeps only sessions whose `cwd` exactly equals the agent's `projectPath`
- * (DOR-203; ghost/cwd-less sessions are excluded by construction), then merges,
- * sorts `updatedAt` descending, and trims to `limit`. `agentActivity[path]` is
+ * Keeps sessions within each agent's directory, merges by session id, sorts
+ * `updatedAt` descending, and trims to `limit`. `agentActivity[path]` is
  * the latest `updatedAt` over that agent's (filtered) sessions, computed BEFORE
  * the global trim so it is complete even for agents with no session in the top
  * `limit`.
@@ -41,7 +40,7 @@ export async function listRecentSessions(opts: {
   const { runtimes, agentPaths, limit } = opts;
   const { perPath, warnings } = await fanOutAgentSessions({ runtimes, agentPaths });
 
-  const merged: Session[] = [];
+  const byId = new Map<string, Session>();
   const agentActivity: Record<string, string> = {};
 
   for (const { dir, members } of perPath) {
@@ -51,11 +50,23 @@ export async function listRecentSessions(opts: {
     let latest = members[0]!.updatedAt;
     for (const session of members) {
       if (Date.parse(session.updatedAt) > Date.parse(latest)) latest = session.updatedAt;
-      merged.push(session);
+      // Parent and nested agents can both list this conversation. Deduplicate
+      // before trimming so repeated ids neither crowd out other sessions nor
+      // reach the sidebar as duplicate React keys. Scans run concurrently, so
+      // retain the newest snapshot if the conversation changed between reads.
+      const previous = byId.get(session.id);
+      if (
+        previous === undefined ||
+        Date.parse(session.updatedAt) > Date.parse(previous.updatedAt)
+      ) {
+        byId.set(session.id, session);
+      }
     }
     agentActivity[dir] = latest;
   }
 
-  merged.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  const merged = [...byId.values()].sort(
+    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
+  );
   return { sessions: merged.slice(0, limit), agentActivity, warnings };
 }
