@@ -41,6 +41,28 @@ function createHarness() {
 }
 
 describe('useRecentSessions', () => {
+  it('deduplicates restored data before the first render and caller selection', () => {
+    const { transport, queryClient, wrapper } = createHarness();
+    const first = envelope.sessions[0]!;
+    const second = { ...first, id: '22222222-2222-4222-8222-222222222222' };
+    const cached = { ...envelope, sessions: [first, first, second] };
+    queryClient.setQueryData(sessionKeys.recent(24), cached);
+    const { result } = renderHook(
+      () => ({
+        all: useRecentSessions(24, { enabled: false }),
+        narrowed: useRecentSessions(24, {
+          enabled: false,
+          select: (data) => data.sessions.slice(0, 2).map((session) => session.id),
+        }),
+      }),
+      { wrapper }
+    );
+    expect(result.current.all.data?.sessions).toEqual([first, second]);
+    expect(result.current.narrowed.data).toEqual([first.id, second.id]);
+    expect(transport.listRecentSessions).not.toHaveBeenCalled();
+    expect(cached.sessions).toHaveLength(3);
+  });
+
   it('calls transport.listRecentSessions with the given limit and exposes the envelope', async () => {
     const { transport, wrapper } = createHarness();
 
