@@ -852,6 +852,14 @@ describe('TouchChipStrip — chip anatomy', () => {
 });
 
 describe('TouchChipStrip — what the verb signatures are given to animate', () => {
+  it('does not animate an unfinished command after its turn ends', () => {
+    const parts = [toolCall('Bash', { command: 'pnpm test' }, { status: 'running' })];
+    render(<TouchChipStrip sessionId={SESSION_ID} parts={parts} turnActive={false} />);
+    expect(screen.queryByTestId('chip-live-row')).toBeNull();
+    expect(screen.queryByTestId('chip-cursor')).toBeNull();
+    expect(parts[0]!.status).toBe('running');
+  });
+
   /** The chip for `label` in the live row. */
   function liveChip(label: string): HTMLElement {
     const row = screen.getByTestId('chip-live-row');

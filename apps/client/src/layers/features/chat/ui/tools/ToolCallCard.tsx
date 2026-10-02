@@ -18,6 +18,7 @@ import { OutputRenderer } from '../message/OutputRenderer';
 interface HookRowProps {
   /** Single hook execution to display as a compact sub-row. */
   hook: HookState;
+  turnActive?: boolean;
 }
 
 /** Status icon map for hook execution states. */
@@ -32,7 +33,7 @@ const hookStatusIcon = {
  * Compact sub-row for a single hook execution inside a tool call card.
  * Clickable to expand/collapse output. Error hooks start expanded.
  */
-function HookRow({ hook }: HookRowProps) {
+function HookRow({ hook, turnActive }: HookRowProps) {
   const hasOutput = !!(hook.stdout || hook.stderr);
   const [expanded, setExpanded] = useState(hook.status === 'error');
   const output = hook.stderr || hook.stdout;
@@ -45,7 +46,9 @@ function HookRow({ hook }: HookRowProps) {
         aria-expanded={hasOutput ? expanded : undefined}
         disabled={!hasOutput}
       >
-        {hookStatusIcon[hook.status]}
+        {turnActive === false && hook.status === 'running'
+          ? getToolStatusIcon('neutral')
+          : hookStatusIcon[hook.status]}
         <span
           className={cn(
             'text-3xs font-mono',
@@ -82,10 +85,15 @@ function HookRow({ hook }: HookRowProps) {
 interface ToolCallCardProps {
   toolCall: ToolCallState;
   defaultExpanded?: boolean;
+  /** False for a settled turn, even if its transcript has no final tool result. */
+  turnActive?: boolean;
 }
 
 /** Expandable card displaying a tool call's status, arguments, and result. */
-export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCardProps) {
+export function ToolCallCard({ toolCall, defaultExpanded = false, turnActive }: ToolCallCardProps) {
+  const inactive =
+    turnActive === false && (toolCall.status === 'running' || toolCall.status === 'pending');
+  const displayStatus = inactive ? 'neutral' : toolCall.status;
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   const hasProgress = !!toolCall.progressOutput;
@@ -100,7 +108,7 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCard
     toolCall.hooks && toolCall.hooks.length > 0 ? (
       <div className="border-border/50 space-y-0.5 border-t px-3 py-1">
         {toolCall.hooks.map((hook) => (
-          <HookRow key={hook.hookId} hook={hook} />
+          <HookRow key={hook.hookId} hook={hook} turnActive={turnActive} />
         ))}
       </div>
     ) : undefined;
@@ -120,10 +128,10 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCard
       extraContent={hooksSection}
       data-testid="tool-call-card"
       data-tool-name={toolCall.toolName}
-      data-status={toolCall.status}
+      data-status={displayStatus}
       header={
         <>
-          {getToolStatusIcon(toolCall.status)}
+          {getToolStatusIcon(displayStatus)}
           {badge && (
             <span className="bg-muted text-muted-foreground text-3xs rounded px-1 py-0.5 font-medium">
               {badge}
@@ -132,6 +140,7 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCard
           <span className="text-3xs flex-1 text-left font-mono">
             {getToolLabel(toolCall.toolName, toolCall.input)}
           </span>
+          {inactive && <span className="text-muted-foreground text-3xs">Not running</span>}
           {duration !== undefined && (
             <span className="text-muted-foreground text-3xs tabular-nums">
               {formatDuration(duration)}
@@ -140,7 +149,12 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCard
         </>
       }
     >
-      {toolCall.status === 'running' && !toolCall.input ? (
+      {inactive && toolCall.result === undefined && (
+        <p className="text-muted-foreground py-1 text-xs">
+          This turn has ended. No result was recorded for this tool.
+        </p>
+      )}
+      {displayStatus === 'running' && !toolCall.input ? (
         <div className="text-muted-foreground flex items-center gap-1.5 py-1 text-xs">
           <Spinner size="xs" />
           <span>Preparing…</span>
@@ -149,7 +163,7 @@ export function ToolCallCard({ toolCall, defaultExpanded = false }: ToolCallCard
         <ToolArgumentsDisplay
           toolName={toolCall.toolName}
           input={toolCall.input}
-          isStreaming={toolCall.status === 'running'}
+          isStreaming={displayStatus === 'running'}
         />
       ) : null}
       {toolCall.progressOutput && !toolCall.result && (

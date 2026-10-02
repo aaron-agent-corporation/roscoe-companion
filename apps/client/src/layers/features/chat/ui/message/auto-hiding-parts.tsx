@@ -66,6 +66,7 @@ function AutoHideToolCall({
   part,
   autoHide,
   expandToolCalls,
+  turnActive,
 }: {
   part: {
     toolCallId: string;
@@ -80,6 +81,7 @@ function AutoHideToolCall({
   };
   autoHide: boolean;
   expandToolCalls: boolean;
+  turnActive?: boolean;
 }) {
   const hasFailedHook = part.hooks?.some((h) => h.status === 'error') ?? false;
   const visible = useToolCallVisibility(part.status, autoHide, hasFailedHook);
@@ -105,6 +107,7 @@ function AutoHideToolCall({
               startedAt: part.startedAt,
               completedAt: part.completedAt,
             }}
+            turnActive={turnActive}
             defaultExpanded={expandToolCalls}
           />
         </motion.div>
@@ -129,15 +132,22 @@ export function ToolCallWithApp({
   sessionId,
   autoHide,
   expandToolCalls,
+  turnActive,
 }: {
   part: Extract<MessagePart, { type: 'tool_call' }>;
   sessionId: string;
   autoHide: boolean;
   expandToolCalls: boolean;
+  turnActive?: boolean;
 }) {
   const mcpServer = part.ui ? mcpServerFromToolName(part.toolName) : undefined;
   const card = (
-    <AutoHideToolCall part={part} autoHide={autoHide} expandToolCalls={expandToolCalls} />
+    <AutoHideToolCall
+      part={part}
+      autoHide={autoHide}
+      expandToolCalls={expandToolCalls}
+      turnActive={turnActive}
+    />
   );
   if (!part.ui || part.status !== 'complete' || !mcpServer) return card;
   return (

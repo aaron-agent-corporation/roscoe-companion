@@ -339,6 +339,7 @@ export function AssistantMessageContent({ message }: { message: ChatMessage }) {
               sessionId={sessionId}
               autoHide={autoHideToolCalls}
               expandToolCalls={expandToolCalls}
+              turnActive={message._streaming === true}
             />
           ))}
         </AskReceiptRow>
@@ -401,6 +402,7 @@ export function AssistantMessageContent({ message }: { message: ChatMessage }) {
               sessionId={sessionId}
               autoHide={autoHideToolCalls}
               expandToolCalls={expandToolCalls}
+              turnActive={message._streaming === true}
             />
           }
         />
@@ -415,6 +417,7 @@ export function AssistantMessageContent({ message }: { message: ChatMessage }) {
         sessionId={sessionId}
         autoHide={autoHideToolCalls}
         expandToolCalls={expandToolCalls}
+        turnActive={message._streaming === true}
       />
     );
   }

@@ -154,9 +154,16 @@ function SummaryGroup({
  * @param props - The message's parts, the session it belongs to, and whether its
  *   turn is still running.
  */
-export function TouchChipStrip({ parts, sessionId, turnActive = false }: TouchChipStripProps) {
+export function TouchChipStrip({ parts, sessionId, turnActive }: TouchChipStripProps) {
   const reducedMotion = useReducedMotion() ?? false;
-  const chips = useMemo(() => accumulateTouchChips(parts), [parts]);
+  const chips = useMemo(() => {
+    const accumulated = accumulateTouchChips(parts);
+    // History may end without a tool result. The turn's settled state overrides
+    // those unfinished records so their command cursors do not blink forever.
+    return turnActive === false
+      ? accumulated.map((chip) => (chip.live ? { ...chip, live: false } : chip))
+      : accumulated;
+  }, [parts, turnActive]);
   const pulses = useUpgradePulses();
   const trayId = useId();
   const tray = useTrayExpansion(
@@ -206,7 +213,7 @@ export function TouchChipStrip({ parts, sessionId, turnActive = false }: TouchCh
   // strip whose caller does not track the turn (a showcase, a test), but a
   // running turn holds it up on its own — including through the gaps between
   // tool calls, where nothing is pending and the row used to collapse.
-  const live = turnActive || chips.some((chip) => chip.live);
+  const live = turnActive ?? chips.some((chip) => chip.live);
   const { visible, absorbed } = useMemo(() => splitLiveWindow(chips), [chips]);
 
   if (chips.length === 0) return null;

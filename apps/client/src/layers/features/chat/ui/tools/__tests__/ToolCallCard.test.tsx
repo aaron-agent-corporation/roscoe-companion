@@ -49,6 +49,30 @@ function makeToolCall(overrides: Partial<ToolCallState> = {}): ToolCallState {
 }
 
 describe('ToolCallCard truncation', () => {
+  it('shows an unfinished historical tool as not running without claiming success', () => {
+    render(
+      <ToolCallCard
+        toolCall={makeToolCall({ status: 'running' })}
+        turnActive={false}
+        defaultExpanded
+      />
+    );
+    expect(screen.getByTestId('tool-call-card')).toHaveAttribute('data-status', 'neutral');
+    expect(screen.getByText('Not running')).toBeInTheDocument();
+    expect(
+      screen.getByText('This turn has ended. No result was recorded for this tool.')
+    ).toBeInTheDocument();
+  });
+
+  it('keeps a live tool running until its turn ends', () => {
+    const toolCall = makeToolCall({ status: 'running' });
+    const { rerender } = render(<ToolCallCard toolCall={toolCall} turnActive />);
+    expect(screen.getByTestId('tool-call-card')).toHaveAttribute('data-status', 'running');
+    rerender(<ToolCallCard toolCall={toolCall} turnActive={false} />);
+    expect(screen.getByTestId('tool-call-card')).toHaveAttribute('data-status', 'neutral');
+    expect(toolCall.status).toBe('running');
+  });
+
   it('renders short result fully without a show-more button', () => {
     const shortResult = 'Hello world';
     render(<ToolCallCard toolCall={makeToolCall({ result: shortResult })} defaultExpanded />);
